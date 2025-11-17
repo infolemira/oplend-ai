@@ -118,4 +118,93 @@ app.get("/widget.js", (req, res) => {
     });
 
   async function send(){
-    const text = input.valu
+    const text = input.value.trim();
+    if(!text) return;
+
+    input.value = "";
+    add("user", text);
+
+    const row = document.createElement("div");
+    row.style.margin = "8px 0";
+    row.innerHTML = "<div style='padding:10px 12px;border-radius:12px;border:1px solid #eee;background:white'>…</div>";
+    chat.appendChild(row);
+    chat.scrollTop = chat.scrollHeight;
+    const bubble = row.querySelector("div");
+
+    const r = await fetch(host + "/api/chat", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ projectId, message: text })
+    });
+    const j = await r.json();
+
+    bubble.textContent = j.reply || "OK.";
+  }
+
+  sendBtn.onclick = send;
+  input.addEventListener("keydown", e => {
+    if(e.key === "Enter" && !e.shiftKey){
+      e.preventDefault();
+      send();
+    }
+  });
+})();
+`;
+
+  res.setHeader("Content-Type", "application/javascript");
+  res.send(js);
+});
+
+// -------- PROJECT CONFIG ENDPOINT --------
+app.get("/api/projects/:id/config", (req, res) => {
+  const p = PROJECTS[req.params.id] || PROJECTS["burek01"];
+
+  res.json({
+    title: p.title,
+    description: "Bestellen Sie Burek: Käse, Fleisch, Kartoffeln.",
+    welcome: "Willkommen! Bitte Sorte und Anzahl angeben.",
+    pricing: p.pricing
+  });
+});
+
+// -------- CHAT ENDPOINT --------
+app.post("/api/chat", async (req, res) => {
+  try {
+    const { projectId = "burek01", message } = req.body || {};
+    const p = PROJECTS[projectId];
+
+    const messages = [
+      { role: "system", content: p.systemPrompt },
+      { role: "user", content: message }
+    ];
+
+    const ai = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages
+    });
+
+    const reply = ai.choices[0].message.content;
+
+    // Save to Supabase
+    if (supabase) {
+      await supabase.from("orders").insert({
+        project_id: projectId,
+        user_message: message,
+        ai_reply: reply
+      });
+    }
+
+    res.json({ reply });
+
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// -------- ROOT --------
+app.get("/", (req, res) => {
+  res.send("Oplend AI – running");
+});
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log("Server running on port " + port));
