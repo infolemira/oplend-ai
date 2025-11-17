@@ -5,30 +5,22 @@ import cors from "cors";
 import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
 
+// --- osnovna Express postavka ---
 const app = express();
 app.use(express.json());
 
-// CORS – dozvoli samo tvoj sajt (po potrebi dodaj još domene)
+// CORS – dozvoli tvoj sajt (po potrebi dodaj još domene)
 app.use(
   cors({
-    origin: [
-      "https://oplend.com",
-      "https://www.oplend.com",
-    ],
+    origin: ["https://oplend.com", "https://www.oplend.com"],
   })
 );
 
-// -------- ENV VARS --------
-const {
-  OPENAI_API_KEY,
-  SUPABASE_URL,
-  SUPABASE_SERVICE_KEY,
-} = process.env;
+// --- ENV varijable ---
+const { OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
 
 // OpenAI client
-const openai = new OpenAI({
-  apiKey: OPENAI_API_KEY,
-});
+const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
 // Supabase client (može biti null ako env nije postavljen)
 const supabase =
@@ -36,7 +28,7 @@ const supabase =
     ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
     : null;
 
-// -------- PROJECT CONFIGS --------
+// --- Konfiguracije projekata ---
 const PROJECTS = {
   burek01: {
     lang: "de",
@@ -57,10 +49,33 @@ Regeln:
 - Keine anderen Produkte anbieten.
     `,
   },
-  // ovdje kasnije možeš dodati npr. frizer01, pizza01 itd.
 };
 
-// -------- WIDGET.JS --------
+// --- Pomoćna funkcija: parsiranje količina iz teksta ---
+function parseQuantities(message) {
+  const text = (message || "").toLowerCase();
+
+  const extract = (re) => {
+    const m = text.match(re);
+    return m ? Number(m[1]) || 0 : 0;
+  };
+
+  // Dozvoljavamo do ~20 nedigitalnih znakova između broja i riječi,
+  // npr. "2x Burek mit Käse", "1 x mit Fleisch", itd.
+  const kaese = extract(
+    /(\d+)\s*(?:x|×)?[^\d\n]{0,20}(käse|kaese)/i
+  );
+  const fleisch = extract(
+    /(\d+)\s*(?:x|×)?[^\d\n]{0,20}fleisch/i
+  );
+  const kartoffeln = extract(
+    /(\d+)\s*(?:x|×)?[^\d\n]{0,20}kartoffeln?/i
+  );
+
+  return { kaese, fleisch, kartoffeln };
+}
+
+// --- WIDGET.JS endpoint (skripta koju ubacuješ u DNN) ---
 app.get("/widget.js", (req, res) => {
   const js = `
 (function(){
@@ -68,7 +83,7 @@ app.get("/widget.js", (req, res) => {
   const projectId = script.getAttribute('data-project') || 'burek01';
   const host = script.src.split("/widget.js")[0];
 
-  // Create widget box
+  // Kreiraj box za chat
   const box = document.createElement('div');
   box.style.cssText = "max-width:900px;margin:0 auto;border:1px solid #ddd;border-radius:10px;overflow:hidden;font-family:Arial, sans-serif";
 
@@ -113,7 +128,7 @@ app.get("/widget.js", (req, res) => {
     chat.scrollTop = chat.scrollHeight;
   }
 
-  // Load config
+  // Učitaj opis / welcome poruku
   fetch(host + "/api/projects/" + projectId + "/config")
     .then(r => r.json())
     .then(cfg => {
@@ -128,7 +143,7 @@ app.get("/widget.js", (req, res) => {
     input.value = "";
     add("user", text);
 
-    // "Thinking" bubble
+    // "Thinking" balon
     const row = document.createElement("div");
     row.style.margin = "8px 0";
     row.innerHTML = "<div style='padding:10px 12px;border-radius:12px;border:1px solid #eee;background:white'>…</div>";
@@ -144,7 +159,6 @@ app.get("/widget.js", (req, res) => {
       });
       const j = await r.json();
 
-      // reply + (opcionalno) total
       let replyText = j.reply || "OK.";
       if (j.total) {
         replyText += "\\n\\nVorläufiger Gesamtpreis: " +
@@ -172,7 +186,7 @@ app.get("/widget.js", (req, res) => {
   res.send(js);
 });
 
-// -------- PROJECT CONFIG ENDPOINT --------
+// --- Config endpoint za widget ---
 app.get("/api/projects/:id/config", (req, res) => {
   const p = PROJECTS[req.params.id] || PROJECTS["burek01"];
 
@@ -184,13 +198,13 @@ app.get("/api/projects/:id/config", (req, res) => {
   });
 });
 
-// -------- CHAT ENDPOINT --------
+// --- CHAT endpoint ---
 app.post("/api/chat", async (req, res) => {
   try {
     const { projectId = "burek01", message } = req.body || {};
     const p = PROJECTS[projectId] || PROJECTS["burek01"];
 
-    // 1) Poruke za OpenAI
+    // 1) OpenAI poruke
     const messages = [
       { role: "system", content: p.systemPrompt },
       { role: "user", content: message },
@@ -203,45 +217,29 @@ app.post("/api/chat", async (req, res) => {
 
     let reply = ai.choices?.[0]?.message?.content || "OK.";
 
-    // 2) Grubi parsing poruke za količine (DE),
-    //    sada dozvoljavamo tekst između broja i riječi (npr. "2x Burek mit Käse")
-    const text = (message || "").toLowerCase();
-
-    const getQty = (patterns) => {
-      for (const pat of patterns) {
-        // dozvoli do ~20 nedigitalnih znakova između količine i riječi
-        const re = new RegExp("(\\\d+)\\s*(x|×)?[^\\\d\\\n]{0,20}" + pat, "i");
-        const m = text.match(re);
-        if (m) return Number(m[1]) || 0;
-      }
-      return 0;
-    };
-
-    const qtyKaese = getQty(["käse", "kaese"]);
-    const qtyFleisch = getQty(["fleisch"]);
-    const qtyKartoffeln = getQty(["kartoffel", "kartoffeln"]);
-
+    // 2) Parsiraj količine i izračunaj total
+    const { kaese, fleisch, kartoffeln } = parseQuantities(message || "");
     const prices = p.pricing || {};
-    const total =
-      qtyKaese * (prices.kaese || 0) +
-      qtyFleisch * (prices.fleisch || 0) +
-      qtyKartoffeln * (prices.kartoffeln || 0);
 
-    // 3) Dodaj informaciju o cijeni u reply (ako ima smisla)
+    const total =
+      kaese * (prices.kaese || 0) +
+      fleisch * (prices.fleisch || 0) +
+      kartoffeln * (prices.kartoffeln || 0);
+
     if (total > 0) {
       const parts = [];
-      if (qtyKaese) parts.push(`${qtyKaese}× Käse`);
-      if (qtyFleisch) parts.push(`${qtyFleisch}× Fleisch`);
-      if (qtyKartoffeln) parts.push(`${qtyKartoffeln}× Kartoffeln`);
+      if (kaese) parts.push(\`\${kaese}× Käse\`);
+      if (fleisch) parts.push(\`\${fleisch}× Fleisch\`);
+      if (kartoffeln) parts.push(\`\${kartoffeln}× Kartoffeln\`);
 
-      reply += `
+      reply += \`
 
-Vorläufiger Gesamtpreis für ${parts.join(
+Vorläufiger Gesamtpreis für \${parts.join(
         ", "
-      )}: ${total.toFixed(2)} € (Richtwert, Zahlung bei Abholung).`;
+      )}: \${total.toFixed(2)} € (Richtwert, Zahlung bei Abholung).\`;
     }
 
-    // 4) Spremi u Supabase (ako je konfigurisan)
+    // 3) Spremi u Supabase (ako je dostupno)
     if (supabase) {
       try {
         await supabase.from("orders").insert({
@@ -249,9 +247,9 @@ Vorläufiger Gesamtpreis für ${parts.join(
           user_message: message,
           ai_reply: reply,
           items: {
-            kaese: qtyKaese,
-            fleisch: qtyFleisch,
-            kartoffeln: qtyKartoffeln,
+            kaese,
+            fleisch,
+            kartoffeln,
           },
           total: total > 0 ? total : null,
         });
@@ -260,7 +258,6 @@ Vorläufiger Gesamtpreis für ${parts.join(
       }
     }
 
-    // 5) Pošalji klijentu
     res.json({ reply, total: total > 0 ? total : null });
   } catch (e) {
     console.error("CHAT ERROR:", e);
@@ -268,7 +265,7 @@ Vorläufiger Gesamtpreis für ${parts.join(
   }
 });
 
-// -------- ROOT --------
+// --- Root ---
 app.get("/", (req, res) => {
   res.send("Oplend AI – running");
 });
