@@ -197,18 +197,20 @@ app.post("/api/chat", async (req, res) => {
     ];
 
     const ai = await openai.chat.completions.create({
-      model: "gpt-4o-mini",        // možeš promijeniti model ako želiš
+      model: "gpt-4o-mini",
       messages,
     });
 
     let reply = ai.choices?.[0]?.message?.content || "OK.";
 
-    // 2) Grubi parsing poruke za količine (DE)
+    // 2) Grubi parsing poruke za količine (DE),
+    //    sada dozvoljavamo tekst između broja i riječi (npr. "2x Burek mit Käse")
     const text = (message || "").toLowerCase();
 
     const getQty = (patterns) => {
       for (const pat of patterns) {
-        const re = new RegExp("(\\d+)\\s*(x|×)?\\s*" + pat, "i");
+        // dozvoli do ~20 nedigitalnih znakova između količine i riječi
+        const re = new RegExp("(\\\d+)\\s*(x|×)?[^\\\d\\\n]{0,20}" + pat, "i");
         const m = text.match(re);
         if (m) return Number(m[1]) || 0;
       }
