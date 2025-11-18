@@ -1,15 +1,15 @@
-// server.js – Oplend AI mit History-Unterstützung (clean)
+// server.js – Oplend AI (jednostavna verzija)
 
 import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
 
-// --- osnovna Express postavka ---
+// --- Express app ---
 const app = express();
 app.use(express.json());
 
-// CORS – dozvoli tvoj sajt (po potrebi dodaj još domene)
+// --- CORS: dozvoli Oplend ---
 app.use(
   cors({
     origin: ["https://oplend.com", "https://www.oplend.com"],
@@ -22,13 +22,13 @@ const { OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
 // OpenAI client
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-// Supabase client (može biti null ako env nije postavljen)
+// Supabase client (samo ako su postavljene varijable)
 const supabase =
   SUPABASE_URL && SUPABASE_SERVICE_KEY
     ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
     : null;
 
-// --- Konfiguracije projekata ---
+// --- Konfiguracija projekta ---
 const PROJECTS = {
   burek01: {
     lang: "de",
@@ -40,50 +40,38 @@ Du bist ein Bestell-Assistent für eine Bäckerei. Du nimmst ausschließlich Bes
 2) Burek mit Fleisch
 3) Burek mit Kartoffeln
 
-REGELN (sehr wichtig):
+Regeln:
 - Antworte immer auf Deutsch, höflich und klar.
-- Frage zu Beginn nach Sorte(n) und Anzahl, falls der Kunde das noch nicht genannt hat.
-- Wenn der Kunde bereits Sorte(n) UND Anzahl genannt hat (z.B. "2x Käse, 1x Fleisch"),
-  DANN STELLE DIESE FRAGEN NICHT NOCHMAL.
-- Danach frage nur noch nach: Abholzeit, Name, Telefonnummer.
-- Sobald du alle Informationen hast (Sorten + Anzahl + Abholzeit + Name + Telefonnummer),
-  ERSTELLE EINE VOLLSTÄNDIGE BESTELLBESTÄTIGUNG in klarer Liste.
-- Wiederhole dabei NICHT mehr dieselben Fragen, sondern fasse alles zusammen.
-- Berechne den Gesamtpreis anhand der Preisliste (Käse 3,50 €, Fleisch 4,00 €, Kartoffeln 3,50 €)
-  und gib den Betrag in Euro an.
-- Frage den Kunden am Ende nur noch nach einer kurzen Bestätigung ("Ja, bestätigen").
+- Frage nach Sorte(n), Anzahl, Abholzeit, Name, Telefonnummer.
+- Erkläre kurz die Preise, wenn es passt.
+- Erstelle am Ende eine klare Zusammenfassung der Bestellung.
+- Berechne den Gesamtpreis anhand der Preisliste:
+  * Burek mit Käse: 3,50 €
+  * Burek mit Fleisch: 4,00 €
+  * Burek mit Kartoffeln: 3,50 €
 - Biete keine anderen Produkte an.
     `,
   },
 };
 
-// --- Pomoćna funkcija: parsiranje količina iz CIJELOG razgovora ---
-function parseQuantitiesFromConversation(history, lastMessage) {
-  const allText =
-    (history || [])
-      .filter((m) => m && typeof m.content === "string")
-      .map((m) => m.content)
-      .join("\n") +
-    "\n" +
-    (lastMessage || "");
-
-  const text = allText.toLowerCase();
+// --- Pomoćna funkcija: parsiranje količina iz jedne poruke ---
+function parseQuantities(message) {
+  const text = (message || "").toLowerCase();
 
   const extract = (re) => {
     const m = text.match(re);
     return m ? Number(m[1]) || 0 : 0;
   };
 
-  // Dozvoljavamo do ~25 nedigitalnih znakova između broja i ključne riječi,
-  // npr. "2x Burek mit Käse", "1 x mit Fleisch", "3 Stück Burek mit Kartoffeln" itd.
-  const kaese = extract(/(\d+)\s*(?:x|×)?[^\d\n]{0,25}(käse|kaese)/i);
-  const fleisch = extract(/(\d+)\s*(?:x|×)?[^\d\n]{0,25}fleisch/i);
-  const kartoffeln = extract(/(\d+)\s*(?:x|×)?[^\d\n]{0,25}kartoffeln?/i);
+  // npr: "2x Burek mit Käse", "1 x mit Fleisch", "3 Stück Kartoffeln"
+  const kaese = extract(/(\d+)\s*(?:x|mal)?[^\d\n]{0,25}(käse|kaese)/i);
+  const fleisch = extract(/(\d+)\s*(?:x|mal)?[^\d\n]{0,25}fleisch/i);
+  const kartoffeln = extract(/(\d+)\s*(?:x|mal)?[^\d\n]{0,25}kartoffeln?/i);
 
   return { kaese, fleisch, kartoffeln };
 }
 
-// --- WIDGET.JS endpoint (skripta koju ubacuješ u DNN) ---
+// --- WIDGET.JS endpoint (jednostavan chat bez historyja) ---
 app.get("/widget.js", (req, res) => {
   const js = `
 (function(){
@@ -91,10 +79,7 @@ app.get("/widget.js", (req, res) => {
   const projectId = script.getAttribute('data-project') || 'burek01';
   const host = script.src.split("/widget.js")[0];
 
-  // History poruka (user + assistant) – šaljemo na backend
-  const history = [];
-
-  // Kreiraj box za chat
+  // CHAT KUTIJA
   const box = document.createElement('div');
   box.style.cssText = "max-width:900px;margin:0 auto;border:1px solid #ddd;border-radius:10px;overflow:hidden;font-family:Arial, sans-serif";
 
@@ -105,7 +90,7 @@ app.get("/widget.js", (req, res) => {
     "<div id=\\"opl-chat\\" style=\\"height:60vh;overflow:auto;padding:12px;background:#fafafa\\"></div>" +
     "<div style=\\"display:flex;gap:8px;padding:12px;border-top:1px solid #eee;background:white\\">" +
     "<textarea id=\\"opl-in\\" placeholder=\\"Nachricht...\\" style=\\"flex:1;min-height:44px;border:1px solid #ddd;border-radius:8px;padding:10px\\"></textarea>" +
-    "<button id=\\"opl-send\\" style=\\"padding:10px 14px;border:1px solid #222;background:#222;color:white;border-radius:8px;cursor:pointer\\">Senden</button>" +
+    "<button id=\\"opl-send\\" style=\\"padding:10px 16px;border:1px solid #222;background:#222;color:white;border-radius:8px;cursor:pointer\\">Senden</button>" +
     "</div>";
 
   script.parentNode.insertBefore(box, script);
@@ -135,53 +120,57 @@ app.get("/widget.js", (req, res) => {
     chat.scrollTop = chat.scrollHeight;
   }
 
-  // Učitaj opis / welcome poruku
+  // UČITAJ CONFIG (opis + welcome)
   fetch(host + "/api/projects/" + projectId + "/config")
-    .then(r => r.json())
-    .then(cfg => {
-      const welcome = cfg.welcome || "Willkommen! Was darf’s sein?";
+    .then(function(r){ return r.json(); })
+    .then(function(cfg){
+      var welcome = cfg.welcome || "Willkommen! Was darf’s sein?";
       desc.textContent = cfg.description || "";
       add("assistant", welcome);
-      history.push({ role: "assistant", content: welcome });
+    })
+    .catch(function(err){
+      console.error("Config error:", err);
+      add("assistant", "Willkommen! Was darf’s sein?");
     });
 
+  // SLANJE PORUKE
   async function send(){
-    const text = input.value.trim();
+    var text = input.value.trim();
     if(!text) return;
 
     input.value = "";
     add("user", text);
-    history.push({ role: "user", content: text });
 
-    // "Thinking" balon
-    const row = document.createElement("div");
+    var row = document.createElement("div");
     row.style.margin = "8px 0";
     row.innerHTML = "<div style='padding:10px 12px;border-radius:12px;border:1px solid #eee;background:white'>…</div>";
     chat.appendChild(row);
     chat.scrollTop = chat.scrollHeight;
-    const bubble = row.querySelector("div");
+    var bubble = row.querySelector("div");
 
     try {
-      const r = await fetch(host + "/api/chat", {
+      var r = await fetch(host + "/api/chat", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({ projectId, message: text, history })
+        body: JSON.stringify({
+          projectId: projectId,
+          message: text
+        })
       });
-      const j = await r.json();
 
-      var replyText = j.reply || "OK.";
+      var j = await r.json();
+      var reply = j.reply || "OK.";
+
       if (j.total) {
-        replyText += "\\n\\nVorläufiger Gesamtpreis: " +
-          Number(j.total).toFixed(2) +
-          " € (Richtwert, Zahlung bei Abholung).";
+        reply += "\\n\\nVorläufiger Gesamtpreis: " +
+          Number(j.total).toFixed(2) + " € (Richtwert, Zahlung bei Abholung).";
       }
 
-      bubble.textContent = replyText;
-      history.push({ role: "assistant", content: replyText });
+      bubble.textContent = reply;
 
     } catch (err) {
       bubble.textContent = "Es tut mir leid, ein Fehler ist aufgetreten.";
-      console.error(err);
+      console.error("Chat error:", err);
     }
   }
 
@@ -192,6 +181,7 @@ app.get("/widget.js", (req, res) => {
       send();
     }
   });
+
 })();
 `;
   res.setHeader("Content-Type", "application/javascript");
@@ -210,32 +200,16 @@ app.get("/api/projects/:id/config", (req, res) => {
   });
 });
 
-// --- CHAT endpoint sa history podrškom ---
+// --- CHAT endpoint ---
 app.post("/api/chat", async (req, res) => {
   try {
-    const {
-      projectId = "burek01",
-      message,
-      history = [],
-    } = req.body || {};
-
+    const { projectId = "burek01", message = "" } = req.body || {};
     const p = PROJECTS[projectId] || PROJECTS["burek01"];
 
-    // 1) pripremi history poruke (dozvoli samo user/assistant)
-    const safeHistory = Array.isArray(history)
-      ? history
-          .filter((m) => m && typeof m.content === "string")
-          .map((m) => ({
-            role: m.role === "assistant" ? "assistant" : "user",
-            content: m.content,
-          }))
-      : [];
-
-    // 2) OpenAI poruke: system + history + nova user poruka
+    // OpenAI poruke
     const messages = [
       { role: "system", content: p.systemPrompt },
-      ...safeHistory,
-      { role: "user", content: message || "" },
+      { role: "user", content: message },
     ];
 
     const ai = await openai.chat.completions.create({
@@ -245,11 +219,8 @@ app.post("/api/chat", async (req, res) => {
 
     let reply = ai.choices?.[0]?.message?.content || "OK.";
 
-    // 3) Parsiraj količine iz cijelog razgovora
-    const { kaese, fleisch, kartoffeln } = parseQuantitiesFromConversation(
-      safeHistory.filter((m) => m.role === "user"),
-      message || ""
-    );
+    // Izračunaj količine i total iz PORUKE
+    const { kaese, fleisch, kartoffeln } = parseQuantities(message);
     const prices = p.pricing || {};
 
     const total =
@@ -259,32 +230,26 @@ app.post("/api/chat", async (req, res) => {
 
     if (total > 0) {
       const parts = [];
-  if (kaese) parts.push(kaese + "x Käse");
-if (fleisch) parts.push(fleisch + "x Fleisch");
-if (kartoffeln) parts.push(kartoffeln + "x Kartoffeln");
+      if (kaese) parts.push(kaese + "x Käse");
+      if (fleisch) parts.push(fleisch + "x Fleisch");
+      if (kartoffeln) parts.push(kartoffeln + "x Kartoffeln");
 
-      if (!reply.includes("Gesamtpreis")) {
-        reply +=
-          "\\n\\nVorläufiger Gesamtpreis für " +
-          parts.join(", ") +
-          ": " +
-          total.toFixed(2) +
-          " € (Richtwert, Zahlung bei Abholung).";
-      }
+      reply +=
+        "\n\nVorläufiger Gesamtpreis für " +
+        parts.join(", ") +
+        ": " +
+        total.toFixed(2) +
+        " € (Richtwert, Zahlung bei Abholung).";
     }
 
-    // 4) Spremi u Supabase (ako je dostupno)
+    // Spremi u Supabase (ako je dostupan)
     if (supabase) {
       try {
         await supabase.from("orders").insert({
           project_id: projectId,
           user_message: message,
           ai_reply: reply,
-          items: {
-            kaese,
-            fleisch,
-            kartoffeln,
-          },
+          items: { kaese, fleisch, kartoffeln },
           total: total > 0 ? total : null,
         });
       } catch (dbErr) {
@@ -304,5 +269,6 @@ app.get("/", (req, res) => {
   res.send("Oplend AI – running");
 });
 
+// Start server
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log("Server running on port " + port));
