@@ -1,4 +1,4 @@
-// server.js – Oplend AI mit History-Unterstützung
+// server.js – Oplend AI mit History-Unterstützung (clean)
 
 import express from "express";
 import cors from "cors";
@@ -78,9 +78,7 @@ function parseQuantitiesFromConversation(history, lastMessage) {
   // npr. "2x Burek mit Käse", "1 x mit Fleisch", "3 Stück Burek mit Kartoffeln" itd.
   const kaese = extract(/(\d+)\s*(?:x|×)?[^\d\n]{0,25}(käse|kaese)/i);
   const fleisch = extract(/(\d+)\s*(?:x|×)?[^\d\n]{0,25}fleisch/i);
-  const kartoffeln = extract(
-    /(\d+)\s*(?:x|×)?[^\d\n]{0,25}kartoffeln?/i
-  );
+  const kartoffeln = extract(/(\d+)\s*(?:x|×)?[^\d\n]{0,25}kartoffeln?/i);
 
   return { kaese, fleisch, kartoffeln };
 }
@@ -100,19 +98,15 @@ app.get("/widget.js", (req, res) => {
   const box = document.createElement('div');
   box.style.cssText = "max-width:900px;margin:0 auto;border:1px solid #ddd;border-radius:10px;overflow:hidden;font-family:Arial, sans-serif";
 
-  box.innerHTML = \`
-    <div style="padding:14px 16px;border-bottom:1px solid #eee;background:white">
-      <h2 style="margin:0;font-size:22px">Chat</h2>
-      <div id="opl-desc" style="margin-top:6px;color:#555;font-size:14px"></div>
-    </div>
-
-    <div id="opl-chat" style="height:60vh;overflow:auto;padding:12px;background:#fafafa"></div>
-
-    <div style="display:flex;gap:8px;padding:12px;border-top:1px solid #eee;background:white">
-      <textarea id="opl-in" placeholder="Nachricht..." style="flex:1;min-height:44px;border:1px solid #ddd;border-radius:8px;padding:10px"></textarea>
-      <button id="opl-send" style="padding:10px 14px;border:1px solid #222;background:#222;color:white;border-radius:8px;cursor:pointer">Senden</button>
-    </div>
-  \`;
+  box.innerHTML = "<div style=\\"padding:14px 16px;border-bottom:1px solid #eee;background:white\\">" +
+    "<h2 style=\\"margin:0;font-size:22px\\">Chat</h2>" +
+    "<div id=\\"opl-desc\\" style=\\"margin-top:6px;color:#555;font-size:14px\\"></div>" +
+    "</div>" +
+    "<div id=\\"opl-chat\\" style=\\"height:60vh;overflow:auto;padding:12px;background:#fafafa\\"></div>" +
+    "<div style=\\"display:flex;gap:8px;padding:12px;border-top:1px solid #eee;background:white\\">" +
+    "<textarea id=\\"opl-in\\" placeholder=\\"Nachricht...\\" style=\\"flex:1;min-height:44px;border:1px solid #ddd;border-radius:8px;padding:10px\\"></textarea>" +
+    "<button id=\\"opl-send\\" style=\\"padding:10px 14px;border:1px solid #222;background:#222;color:white;border-radius:8px;cursor:pointer\\">Senden</button>" +
+    "</div>";
 
   script.parentNode.insertBefore(box, script);
 
@@ -175,7 +169,7 @@ app.get("/widget.js", (req, res) => {
       });
       const j = await r.json();
 
-      let replyText = j.reply || "OK.";
+      var replyText = j.reply || "OK.";
       if (j.total) {
         replyText += "\\n\\nVorläufiger Gesamtpreis: " +
           Number(j.total).toFixed(2) +
@@ -192,7 +186,7 @@ app.get("/widget.js", (req, res) => {
   }
 
   sendBtn.onclick = send;
-  input.addEventListener("keydown", e => {
+  input.addEventListener("keydown", function(e){
     if(e.key === "Enter" && !e.shiftKey){
       e.preventDefault();
       send();
@@ -265,17 +259,17 @@ app.post("/api/chat", async (req, res) => {
 
     if (total > 0) {
       const parts = [];
-      if (kaese) parts.push(\`\${kaese}× Käse\`);
-      if (fleisch) parts.push(\`\${fleisch}× Fleisch\`);
-      if (kartoffeln) parts.push(\`\${kartoffeln}× Kartoffeln\`);
+      if (kaese) parts.push(kaese + "x Käse");
+      if (fleisch) parts.push(fleisch + "x Fleisch");
+      if (kartoffeln) parts.push(kartoffeln + "x Kartoffeln");
 
-      // dodaj info o cijeni u odgovor (ako već nije dodan)
-      if (!reply.includes("Vorläufiger Gesamtpreis")) {
-        reply += \`
-
-Vorläufiger Gesamtpreis für \${parts.join(
-          ", "
-        )}: \${total.toFixed(2)} € (Richtwert, Zahlung bei Abholung).\`;
+      if (!reply.includes("Gesamtpreis")) {
+        reply +=
+          "\\n\\nVorläufiger Gesamtpreis für " +
+          parts.join(", ") +
+          ": " +
+          total.toFixed(2) +
+          " € (Richtwert, Zahlung bei Abholung).";
       }
     }
 
