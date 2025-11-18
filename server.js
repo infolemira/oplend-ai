@@ -259,9 +259,9 @@ app.post("/api/chat", async (req, res) => {
 
     if (total > 0) {
       const parts = [];
-      if (kaese) parts.push(kaese + "x Käse");
-      if (fleisch) parts.push(fleisch + "x Fleisch");
-      if (kartoffeln) parts.push(kartoffeln + "x Kartoffeln");
+  if (kaese) parts.push(kaese + "x Käse");
+if (fleisch) parts.push(fleisch + "x Fleisch");
+if (kartoffeln) parts.push(kartoffeln + "x Kartoffeln");
 
       if (!reply.includes("Gesamtpreis")) {
         reply +=
