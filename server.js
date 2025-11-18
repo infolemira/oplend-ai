@@ -1,4 +1,4 @@
-// server.js – Oplend AI (jednostavna verzija)
+// server.js – Oplend AI s history + potvrdom narudžbe
 
 import express from "express";
 import cors from "cors";
@@ -40,23 +40,41 @@ Du bist ein Bestell-Assistent für eine Bäckerei. Du nimmst ausschließlich Bes
 2) Burek mit Fleisch
 3) Burek mit Kartoffeln
 
-Regeln:
+REGELN (sehr wichtig):
 - Antworte immer auf Deutsch, höflich und klar.
-- Frage nach Sorte(n), Anzahl, Abholzeit, Name, Telefonnummer.
-- Erkläre kurz die Preise, wenn es passt.
-- Erstelle am Ende eine klare Zusammenfassung der Bestellung.
+- Wenn der Kunde noch keine Sorten und Stückzahlen genannt hat, frage danach.
+- Wenn der Kunde bereits Sorten UND Stückzahlen genannt hat (z.B. "2x Käse, 1x Fleisch"),
+  dann frage NICHT noch einmal nach Sorten oder Stückzahlen.
+- Danach frage nur noch nach: Abholzeit, Name, Telefonnummer.
+- Sobald du alle Informationen hast (Sorten + Anzahl + Abholzeit + Name + Telefonnummer),
+  ERSTELLE EINE VOLLSTÄNDIGE BESTELLBESTÄTIGUNG:
+    * sortierte Liste der bestellten Bureks,
+    * Abholzeit,
+    * Name,
+    * Telefonnummer,
+    * klarer Gesamtpreis.
+- Wiederhole dabei NICHT mehr dieselben Fragen, sondern fasse alles zusammen.
 - Berechne den Gesamtpreis anhand der Preisliste:
   * Burek mit Käse: 3,50 €
   * Burek mit Fleisch: 4,00 €
   * Burek mit Kartoffeln: 3,50 €
+- Schreibe am Ende höflich, dass die Bezahlung bei Abholung erfolgt.
 - Biete keine anderen Produkte an.
     `,
   },
 };
 
-// --- Pomoćna funkcija: parsiranje količina iz jedne poruke ---
-function parseQuantities(message) {
-  const text = (message || "").toLowerCase();
+// --- Pomoćna funkcija: parsiranje količina iz CIJELOG razgovora ---
+function parseQuantitiesFromConversation(userHistory, lastMessage) {
+  const allText =
+    (userHistory || [])
+      .filter((m) => m && typeof m.content === "string")
+      .map((m) => m.content)
+      .join("\n") +
+    "\n" +
+    (lastMessage || "");
+
+  const text = allText.toLowerCase();
 
   const extract = (re) => {
     const m = text.match(re);
@@ -71,13 +89,16 @@ function parseQuantities(message) {
   return { kaese, fleisch, kartoffeln };
 }
 
-// --- WIDGET.JS endpoint (jednostavan chat bez historyja) ---
+// --- WIDGET.JS endpoint (chat s historyjem) ---
 app.get("/widget.js", (req, res) => {
   const js = `
 (function(){
   const script = document.currentScript;
   const projectId = script.getAttribute('data-project') || 'burek01';
   const host = script.src.split("/widget.js")[0];
+
+  // History poruka (user + assistant)
+  const history = [];
 
   // CHAT KUTIJA
   const box = document.createElement('div');
@@ -127,10 +148,13 @@ app.get("/widget.js", (req, res) => {
       var welcome = cfg.welcome || "Willkommen! Was darf’s sein?";
       desc.textContent = cfg.description || "";
       add("assistant", welcome);
+      history.push({ role: "assistant", content: welcome });
     })
     .catch(function(err){
       console.error("Config error:", err);
-      add("assistant", "Willkommen! Was darf’s sein?");
+      var welcome = "Willkommen! Was darf’s sein?";
+      add("assistant", welcome);
+      history.push({ role: "assistant", content: welcome });
     });
 
   // SLANJE PORUKE
@@ -140,6 +164,7 @@ app.get("/widget.js", (req, res) => {
 
     input.value = "";
     add("user", text);
+    history.push({ role: "user", content: text });
 
     var row = document.createElement("div");
     row.style.margin = "8px 0";
@@ -154,19 +179,16 @@ app.get("/widget.js", (req, res) => {
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
           projectId: projectId,
-          message: text
+          message: text,
+          history: history
         })
       });
 
       var j = await r.json();
       var reply = j.reply || "OK.";
 
-      if (j.total) {
-        reply += "\\n\\nVorläufiger Gesamtpreis: " +
-          Number(j.total).toFixed(2) + " € (Richtwert, Zahlung bei Abholung).";
-      }
-
       bubble.textContent = reply;
+      history.push({ role: "assistant", content: reply });
 
     } catch (err) {
       bubble.textContent = "Es tut mir leid, ein Fehler ist aufgetreten.";
@@ -200,15 +222,31 @@ app.get("/api/projects/:id/config", (req, res) => {
   });
 });
 
-// --- CHAT endpoint ---
+// --- CHAT endpoint sa history podrškom ---
 app.post("/api/chat", async (req, res) => {
   try {
-    const { projectId = "burek01", message = "" } = req.body || {};
+    const {
+      projectId = "burek01",
+      message = "",
+      history = [],
+    } = req.body || {};
+
     const p = PROJECTS[projectId] || PROJECTS["burek01"];
 
-    // OpenAI poruke
+    // pripremi history (user + assistant)
+    const safeHistory = Array.isArray(history)
+      ? history
+          .filter((m) => m && typeof m.content === "string")
+          .map((m) => ({
+            role: m.role === "assistant" ? "assistant" : "user",
+            content: m.content,
+          }))
+      : [];
+
+    // OpenAI poruke: system + history + nova user poruka
     const messages = [
       { role: "system", content: p.systemPrompt },
+      ...safeHistory,
       { role: "user", content: message },
     ];
 
@@ -219,8 +257,12 @@ app.post("/api/chat", async (req, res) => {
 
     let reply = ai.choices?.[0]?.message?.content || "OK.";
 
-    // Izračunaj količine i total iz PORUKE
-    const { kaese, fleisch, kartoffeln } = parseQuantities(message);
+    // Izračunaj količine iz CIJELOG user historyja + zadnje poruke
+    const userHistory = safeHistory.filter((m) => m.role === "user");
+    const { kaese, fleisch, kartoffeln } = parseQuantitiesFromConversation(
+      userHistory,
+      message
+    );
     const prices = p.pricing || {};
 
     const total =
@@ -228,7 +270,8 @@ app.post("/api/chat", async (req, res) => {
       fleisch * (prices.fleisch || 0) +
       kartoffeln * (prices.kartoffeln || 0);
 
-    if (total > 0) {
+    // Dodaj jednu jasnu liniju sa cijenom (bez dupliranja)
+    if (total > 0 && !reply.includes("Gesamtpreis")) {
       const parts = [];
       if (kaese) parts.push(kaese + "x Käse");
       if (fleisch) parts.push(fleisch + "x Fleisch");
