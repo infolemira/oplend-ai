@@ -1,277 +1,113 @@
+// server.js – stable version (widget.js mobile fix + demo page + multi-language)
+
 import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
-import { createClient } from "@supabase/supabase-js";
 
-// --- Express app ---
+// ----------------------------
+//  APP & CONFIG
+// ----------------------------
+
 const app = express();
 app.use(express.json());
+app.use(cors({ origin: "*", methods: "*", allowedHeaders: "*" }));
 
-// --- CORS ---
-app.use(
-  cors({
-    origin: ["https://oplend.com", "https://www.oplend.com"],
-  })
-);
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
-// --- ENV ---
-const { OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
-
-// OpenAI client
-const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
-
-// Supabase client
-const supabase =
-  SUPABASE_URL && SUPABASE_SERVICE_KEY
-    ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-    : null;
-
-// --- PROJECT CONFIG ---
 const PROJECTS = {
   burek01: {
     lang: "multi",
     title: "Burek – Online-Bestellung",
     pricing: { kaese: 3.5, fleisch: 4.0, kartoffeln: 3.5 },
     systemPrompt: `
-Du bist ein Bestell-Assistent für eine Bäckerei.
+Du bist ein Bestell-Assistent für eine Bäckerei. 
+Beantworte NUR Bestellungen für Burek (Käse, Fleisch, Kartoffeln).
 
 SPRACHE:
-- Antworte immer in der gleichen Sprache wie die LETZTE Nachricht des Kunden.
-- English → answer in English
-- Deutsch → antworten auf Deutsch
-- Bosanski/Hrvatski/Srpski → odgovaraj tim jezikom
-- Ne mijenjaj jezik usred razgovora.
+– Antworte IMMER in der Sprache der letzten Benutzer-Nachricht
+  (Deutsch / Englisch / Bosnisch / Kroatisch / Serbisch).
 
-(ostatak tvog sistema…)    
+Preise:
+Käse 3,50 €, Fleisch 4 €, Kartoffeln 3,50 €.
+
+Wenn der Kunde Mengen nennt, bestätige Bestellung und nenne Gesamtpreis.
     `,
   },
 };
 
-// --- Quantity parsers ---
-function parseQuantities(text) {
-  const lower = (text || "").toLowerCase();
+// ----------------------------
+//  HELPERS
+// ----------------------------
 
-  const extract = (re) => {
-    const m = lower.match(re);
-    return m ? Number(m[1]) || 0 : 0;
+function parseQuantities(text) {
+  const t = (text || "").toLowerCase();
+
+  const get = (regex) => {
+    const m = t.match(regex);
+    return m ? Number(m[1]) : 0;
   };
 
   return {
-    kaese: extract(/(\d+)\s*(?:x|mal)?[^\d\n]{0,25}(käse|kaese|sir)/i),
-    fleisch: extract(/(\d+)\s*(?:x|mal)?[^\d\n]{0,25}(fleisch|meso)/i),
-    kartoffeln: extract(
-      /(\d+)\s*(?:x|mal)?[^\d\n]{0,25}(kartoffeln?|krumpir|krompir)/i
-    ),
+    kaese: get(/(\d+).{0,15}(käse|kaese|sir)/),
+    fleisch: get(/(\d+).{0,15}(fleisch|meso)/),
+    kartoffeln: get(/(\d+).{0,20}(kartoffeln?|krompir|krumpir)/),
   };
 }
 
-function parseQuantitiesFromConversation(userHistory, lastMessage) {
-  const allText =
-    (userHistory || [])
-      .filter((m) => m && typeof m.content === "string")
-      .map((m) => m.content)
-      .join("\n") +
-    "\n" +
-    (lastMessage || "");
-
-  return parseQuantities(allText);
+function detectLang(text) {
+  const t = (text || "").toLowerCase();
+  if (/[šđćčž]/.test(t)) return "bhs";
+  if (t.includes(" der ") || t.includes(" die ") || t.includes(" das ")) return "de";
+  if (t.includes("thanks") || t.includes("thank")) return "en";
+  return "auto";
 }
 
-// --- WIDGET.JS (frontend) ---
-app.get("/widget.js", (req, res) => {
-  const js = `
-(function(){
-  const script = document.currentScript;
-  const projectId = script.getAttribute('data-project') || 'burek01';
-  const host = script.src.split("/widget.js")[0];
+// ----------------------------
+//  CONFIG ENDPOINT
+// ----------------------------
 
-  const history = [];
-
-  const box = document.createElement('div');
-  box.style.cssText = "max-width:900px;margin:0 auto;border:1px solid #ddd;border-radius:10px;overflow:hidden;font-family:Arial, sans-serif";
-
-  box.innerHTML = "<div style='padding:14px 16px;border-bottom:1px solid #eee;background:white'>" +
-    "<h2 style='margin:0;font-size:22px'>Chat</h2>" +
-    "<div id='opl-desc' style='margin-top:6px;color:#555;font-size:14px'></div>" +
-    "</div>" +
-    "<div id='opl-chat' style='height:60vh;overflow:auto;padding:12px;background:#fafafa'></div>" +
-    "<div style='display:flex;gap:8px;padding:12px;border-top:1px solid #eee;background:white'>" +
-    "<textarea id='opl-in' placeholder='Nachricht...' style='flex:1;min-height:44px;border:1px solid #ddd;border-radius:8px;padding:10px'></textarea>" +
-    "<button id='opl-send' style='padding:10px 16px;border:1px solid #222;background:#222;color:white;border-radius:8px;cursor:pointer'>Senden</button>" +
-    "</div>";
-
-  script.parentNode.insertBefore(box, script);
-
-  const chat = document.getElementById('opl-chat');
-  const input = document.getElementById('opl-in');
-  const sendBtn = document.getElementById('opl-send');
-  const desc = document.getElementById('opl-desc');
-
-  function add(role, text){
-    const row = document.createElement('div');
-    row.style.margin = "8px 0";
-    row.style.display = "flex";
-    row.style.justifyContent = role === 'user' ? 'flex-end' : 'flex-start';
-
-    const b = document.createElement('div');
-    b.style.maxWidth = "75%";
-    b.style.padding = "10px 12px";
-    b.style.borderRadius = "12px";
-    b.style.whiteSpace = "pre-wrap";
-    b.style.border = "1px solid " + (role === 'user' ? "#d6e3ff" : "#eee");
-    b.style.background = role === 'user' ? "#e8f0ff" : "white";
-    b.textContent = text;
-
-    row.appendChild(b);
-    chat.appendChild(row);
-    chat.scrollTop = chat.scrollHeight;
-  }
-
-  fetch(host + "/api/projects/" + projectId + "/config")
-    .then(r => r.json())
-    .then(cfg => {
-      var welcome = cfg.welcome || "Willkommen! Was darf’s sein?";
-      desc.textContent = cfg.description || "";
-      add("assistant", welcome);
-      history.push({ role: "assistant", content: welcome });
-    });
-
-  async function send(){
-    var text = input.value.trim();
-    if(!text) return;
-
-    input.value = "";
-    add("user", text);
-
-    const localHistory = [...history, { role: "user", content: text }];
-
-    var row = document.createElement("div");
-    row.style.margin = "8px 0";
-    row.innerHTML = "<div style='padding:10px 12px;border-radius:12px;border:1px solid #eee;background:white'>…</div>";
-    chat.appendChild(row);
-    chat.scrollTop = chat.scrollHeight;
-    var bubble = row.querySelector("div");
-
-    try {
-      var r = await fetch(host + "/api/chat", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          projectId: projectId,
-          message: text,
-          history: localHistory
-        })
-      });
-
-      var j = await r.json();
-      var reply = j.reply || "OK.";
-
-      bubble.textContent = reply;
-
-      history.push({ role: "user", content: text });
-      history.push({ role: "assistant", content: reply });
-
-    } catch (err) {
-      bubble.textContent = "Fehler.";
-    }
-  }
-
-  sendBtn.onclick = send;
-  input.addEventListener("keydown", function(e){
-    if(e.key === "Enter" && !e.shiftKey){
-      e.preventDefault();
-      send();
-    }
-  });
-
-})();
-`;
-  res.setHeader("Content-Type", "application/javascript");
-  res.send(js);
-});
-
-// --- Config endpoint ---
 app.get("/api/projects/:id/config", (req, res) => {
   const p = PROJECTS[req.params.id] || PROJECTS["burek01"];
-
   res.json({
     title: p.title,
-    description: "Bestellen Sie Burek: Käse, Fleisch, Kartoffeln.",
-    welcome: "Willkommen! Bitte Sorte und Anzahl angeben.",
+    description: "Bestellen Sie Burek: Käse | Fleisch | Kartoffeln",
+    welcome: "Willkommen! Wie kann ich helfen?",
     pricing: p.pricing,
   });
 });
 
-// --- CHAT endpoint ---
+// ----------------------------
+//  CHAT ENDPOINT
+// ----------------------------
+
 app.post("/api/chat", async (req, res) => {
   try {
-    const { projectId = "burek01", message = "", history = [] } = req.body || {};
+    const { projectId = "burek01", message = "", history = [] } = req.body;
     const p = PROJECTS[projectId] || PROJECTS["burek01"];
 
-    const normalized = (message || "").trim().toLowerCase();
-
-    // Instant Antworten: OK / Danke / Hvala
-    const isClosing =
-      normalized === "ok" ||
-      normalized === "okej" ||
-      normalized.startsWith("danke") ||
-      normalized === "thanks" ||
-      normalized.startsWith("hvala");
-
-    if (isClosing) {
-      const reply =
-        "Gerne, Ihre Bestellung ist gespeichert. Einen schönen Tag noch!";
-
-      return res.json({ reply, total: null });
-    }
-
-    // CLEAN HISTORY
     const safeHistory = Array.isArray(history)
       ? history.filter((m) => m && typeof m.content === "string")
       : [];
 
-    /// -------------------------------------
-    /// 🔥 LANGUAGE ENFORCER PATCH
-    /// -------------------------------------
+    const lastUser = safeHistory.filter((x) => x.role === "user").pop()?.content || message;
+    const lang = detectLang(lastUser);
 
-    const userLast = safeHistory.filter(m => m.role === "user").slice(-1)[0]?.content || "";
-
-    function detectLang(text = "") {
-      const t = text.toLowerCase();
-
-      // Bosnian / Croatian / Serbian (šđžćč)
-      if (/[šđćčž]/.test(t)) return "bhs";
-
-      // German markers
-      if (t.includes("der ") || t.includes("die ") || t.includes("das ")) return "de";
-
-      // Basic English assumption
-      if (/^[a-z0-9 ,.!?'-]+$/.test(t)) return "en";
-
-      return "auto";
-    }
-
-    const lang = detectLang(userLast);
-
-    const languageEnforcer = {
-      role: "system",
-      content:
-        lang === "de"
-          ? "Antworte ab jetzt ausschließlich auf Deutsch."
-          : lang === "en"
-          ? "Respond strictly in English."
-          : lang === "bhs"
-          ? "Odgovaraj isključivo na bosanskom/hrvatskom/srpskom jeziku."
-          : "Odgovaraj isključivo na jeziku posljednje poruke korisnika."
-    };
+    const languageInstruction =
+      lang === "de"
+        ? "Antworte ausschließlich auf Deutsch."
+        : lang === "en"
+        ? "Respond strictly in English."
+        : lang === "bhs"
+        ? "Odgovaraj isključivo na bosanskom/hrvatskom/srpskom jeziku."
+        : "Antwort in der Sprache der letzten Benutzer-Nachricht.";
 
     const messagesForAI = [
       { role: "system", content: p.systemPrompt },
-      languageEnforcer,
-      ...safeHistory
+      { role: "system", content: languageInstruction },
+      ...safeHistory, // VEĆ sadrži zadnju user poruku — NE dodajemo je duplo
     ];
-
-    /// -------------------------------------
 
     const ai = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -280,45 +116,165 @@ app.post("/api/chat", async (req, res) => {
 
     let reply = ai.choices?.[0]?.message?.content || "OK.";
 
-    // --- totals ---
-    const userHistory = safeHistory.filter((m) => m.role === "user");
-    const { kaese, fleisch, kartoffeln } = parseQuantitiesFromConversation(
-      userHistory,
-      message
-    );
+    // Izračun cijene
+    const allUserText = safeHistory.filter((m) => m.role === "user").map((m) => m.content).join("\n") + "\n" + message;
+    const qty = parseQuantities(allUserText);
     const prices = p.pricing;
 
     const total =
-      kaese * prices.kaese +
-      fleisch * prices.fleisch +
-      kartoffeln * prices.kartoffeln;
+      qty.kaese * prices.kaese +
+      qty.fleisch * prices.fleisch +
+      qty.kartoffeln * prices.kartoffeln;
 
-    if (total > 0 && !reply.includes("Gesamtpreis")) {
+    if (total > 0 && !reply.includes("€")) {
       const parts = [];
-      if (kaese) parts.push(kaese + "x Käse");
-      if (fleisch) parts.push(fleisch + "x Fleisch");
-      if (kartoffeln) parts.push(kartoffeln + "x Kartoffeln");
+      if (qty.kaese) parts.push(`${qty.kaese}x Käse`);
+      if (qty.fleisch) parts.push(`${qty.fleisch}x Fleisch`);
+      if (qty.kartoffeln) parts.push(`${qty.kartoffeln}x Kartoffeln`);
 
-      reply +=
-        "\n\nVorläufiger Gesamtpreis (" +
-        parts.join(", ") +
-        "): " +
-        total.toFixed(2) +
-        " €.";
+      reply += `\n\nGesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €`;
     }
 
-    res.json({ reply, total: total > 0 ? total : null });
-
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+    return res.json({ reply, total: total || null });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// --- Root ---
+// ----------------------------
+//  widget.js (sa mobile fix)
+// ----------------------------
+
+app.get("/widget.js", (req, res) => {
+  const js = `
+(function(){
+  const script = document.currentScript;
+  const projectId = script.getAttribute("data-project") || "burek01";
+  const host = script.src.split("/widget.js")[0];
+
+  const history = [];
+
+  const box = document.createElement("div");
+  box.style.cssText = "max-width:900px;margin:0 auto;border:1px solid #ddd;border-radius:10px;overflow:hidden;font-family:Arial";
+
+  box.innerHTML =
+    "<div style='padding:14px 16px;border-bottom:1px solid #eee;background:white'>" +
+    "<h2 style='margin:0;font-size:22px'>Chat</h2>" +
+    "<div id='opl-desc' style='margin-top:6px;color:#555;font-size:14px'></div>" +
+    "</div>" +
+    "<div id='opl-chat' style='height:60vh;overflow:auto;padding:12px;background:#fafafa'></div>" +
+    "<div style='display:flex;gap:8px;padding:12px;border-top:1px solid #eee;background:white'>" +
+    "<textarea id='opl-in' placeholder='Nachricht...' style='flex:1;min-height:44px;border:1px solid #ddd;border-radius:8px;padding:10px'></textarea>" +
+    "<button id='opl-send' type='button' style='padding:10px 16px;border:1px solid #222;background:#222;color:white;border-radius:8px;cursor:pointer'>Senden</button>" +
+    "</div>";
+
+  script.parentNode.insertBefore(box, script);
+
+  const chat = document.getElementById("opl-chat");
+  const input = document.getElementById("opl-in");
+  const sendBtn = document.getElementById("opl-send");
+  const desc = document.getElementById("opl-desc");
+
+  function add(role, text){
+    const row = document.createElement("div");
+    row.style.margin = "8px 0";
+    row.style.display = "flex";
+    row.style.justifyContent = role === "user" ? "flex-end" : "flex-start";
+
+    const bubble = document.createElement("div");
+    bubble.style.maxWidth = "75%";
+    bubble.style.padding = "10px 12px";
+    bubble.style.borderRadius = "12px";
+    bubble.style.whiteSpace = "pre-wrap";
+    bubble.style.border = "1px solid " + (role === "user" ? "#d6e3ff" : "#eee");
+    bubble.style.background = role === "user" ? "#e8f0ff" : "white";
+    bubble.textContent = text;
+
+    row.appendChild(bubble);
+    chat.appendChild(row);
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  // Load config
+  fetch(host + "/api/projects/" + projectId + "/config")
+    .then(r => r.json())
+    .then(cfg => {
+      const welcome = cfg.welcome;
+      desc.textContent = cfg.description;
+      add("assistant", welcome);
+      history.push({ role:"assistant", content: welcome });
+    });
+
+  async function send(){
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+
+    add("user", text);
+    history.push({ role:"user", content: text });
+
+    const row = document.createElement("div");
+    row.style.margin = "8px 0";
+    row.innerHTML = "<div style='padding:10px 12px;border-radius:12px;border:1px solid #eee;background:white'>…</div>";
+    chat.appendChild(row);
+    chat.scrollTop = chat.scrollHeight;
+    const bubble = row.querySelector("div");
+
+    try {
+      const r = await fetch(host + "/api/chat", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ projectId, message: text, history })
+      });
+
+      const j = await r.json();
+      bubble.textContent = j.reply;
+      history.push({ role:"assistant", content: j.reply });
+
+    } catch (err) {
+      bubble.textContent = "Fehler beim Senden.";
+    }
+  }
+
+  sendBtn.onclick = send;
+
+  input.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey){
+      e.preventDefault();
+      send();
+    }
+  });
+})();
+`;
+  res.setHeader("Content-Type", "application/javascript");
+  res.send(js);
+});
+
+// ----------------------------
+//  DEMO PAGE
+// ----------------------------
+
+app.get("/demo", (req, res) => {
+  res.send(`
+<html><body>
+<h2>Oplend AI Demo</h2>
+<script src="/widget.js" data-project="burek01"></script>
+</body></html>
+  `);
+});
+
+// ----------------------------
+//  ROOT
+// ----------------------------
+
 app.get("/", (req, res) => {
   res.send("Oplend AI – running");
 });
 
-// Start server
+// ----------------------------
+//  START SERVER
+// ----------------------------
+
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log("Server running on port " + port));
