@@ -1,4 +1,4 @@
-// server.js – Oplend AI s history + potvrdom narudžbe
+// server.js – Oplend AI (više jezika + history + izmjene/storno + OK/Danke)
 
 import express from "express";
 import cors from "cors";
@@ -9,7 +9,7 @@ import { createClient } from "@supabase/supabase-js";
 const app = express();
 app.use(express.json());
 
-// --- CORS: dozvoli Oplend ---
+// --- CORS: dozvoli Oplend domenu ---
 app.use(
   cors({
     origin: ["https://oplend.com", "https://www.oplend.com"],
@@ -31,40 +31,118 @@ const supabase =
 // --- Konfiguracija projekta ---
 const PROJECTS = {
   burek01: {
-    lang: "de",
+    lang: "multi",
     title: "Burek – Online-Bestellung",
     pricing: { kaese: 3.5, fleisch: 4.0, kartoffeln: 3.5 },
     systemPrompt: `
-Du bist ein Bestell-Assistent für eine Bäckerei. Du nimmst ausschließlich Bestellungen für:
+Du bist ein Bestell-Assistent für eine Bäckerei. Du bearbeitest ausschließlich Bestellungen für:
 1) Burek mit Käse
 2) Burek mit Fleisch
 3) Burek mit Kartoffeln
 
-REGELN (sehr wichtig):
-- Antworte immer auf Deutsch, höflich und klar.
-- Wenn der Kunde noch keine Sorten und Stückzahlen genannt hat, frage danach.
-- Wenn der Kunde bereits Sorten UND Stückzahlen genannt hat (z.B. "2x Käse, 1x Fleisch"),
-  dann frage NICHT noch einmal nach Sorten oder Stückzahlen.
-- Danach frage nur noch nach: Abholzeit, Name, Telefonnummer.
-- Sobald du alle Informationen hast (Sorten + Anzahl + Abholzeit + Name + Telefonnummer),
-  ERSTELLE EINE VOLLSTÄNDIGE BESTELLBESTÄTIGUNG:
-    * sortierte Liste der bestellten Bureks,
-    * Abholzeit,
-    * Name,
-    * Telefonnummer,
-    * klarer Gesamtpreis.
-- Wiederhole dabei NICHT mehr dieselben Fragen, sondern fasse alles zusammen.
-- Berechne den Gesamtpreis anhand der Preisliste:
+SPRACHE (SEHR WICHTIG):
+- Der Kunde darf in verschiedenen Sprachen schreiben (z.B. Deutsch, Englisch, Bosnisch, Kroatisch, Serbisch).
+- Antworte IMMER in der gleichen Sprache wie in der LETZTEN Nachricht des Kunden:
+  * Wenn der Kunde auf Deutsch schreibt -> antworte auf Deutsch.
+  * Wenn der Kunde auf Englisch schreibt -> antworte auf Englisch.
+  * Ako piše na bosanskom/hrvatskom/srpskom -> odgovaraj na tom jeziku.
+- Ako je poruka miješana, izaberi glavni jezik poruke i drži se njega.
+- Nemoj mijenjati jezik usred razgovora, osim ako korisnik to izričito zatraži.
+
+DU KANNST FOLGENDE AKTIONEN AUSFÜHREN:
+- Neue Bestellung aufnehmen
+- Eine bestehende Bestellung ERWEITERN (zusätzliche Stücke)
+- Eine bestehende Bestellung REDUZIEREN (weniger Stücke)
+- Eine bestehende Bestellung KOMPLETT STORNIEREN
+- Rückfragen zur bestehenden Bestellung beantworten (z.B. Zeit, Menge, Inhalt)
+
+WICHTIGE REGELN:
+
+1) NEUE BESTELLUNG
+- Wenn noch keine Bestellung vorliegt, frage nach:
+  - Sorten (Käse / Fleisch / Kartoffeln)
+  - Stückzahlen
+  - Abholzeit
+  - Name
+  - Telefonnummer
+- Erkläre kurz die Preise, wenn es hilfreich ist.
+
+2) BESTEHENDE BESTELLUNG ÄNDERN
+- Achte auf Wörter wie: "noch", "zusätzlich", "mehr", "weniger", "abziehen", "reduzieren",
+  "ändern", "korrigieren", "doch lieber", "stattdessen", "još", "više", "manje".
+- Wenn der Kunde so eine Änderung beschreibt, gehe wie folgt vor:
+  a) Sage in eigenen Worten, was du verstanden hast (z.B. "Sie möchten also einen Käse-Burek hinzufügen.").
+  b) FRAGE NACH, ob es sich um:
+     - eine ERGÄNZUNG zur bisherigen Bestellung handelt ("zusätzlich"),
+     - oder um eine NEUE GESAMTZAHL ("insgesamt").
+  c) Nachdem alles klar ist, fasse die AKTUELLE BESTELLUNG in einer Liste zusammen:
+     - z.B. "2x Käse, 1x Fleisch, 1x Kartoffeln".
+  d) Wenn sich durch die Änderung der Gesamtpreis ändert, nenne den NEUEN Gesamtpreis.
+
+3) STORNIERUNG
+- Achte auf Ausdrücke wie: "stornieren", "abbrechen", "komplett löschen", "doch keine Bestellung",
+  "bitte alles annullieren", "keine Bureks mehr", "storno", "otkaži", "poništi".
+- Bestätige eindeutig:
+  - dass die Bestellung STORNIERT ist,
+  - dass keine Ware vorbereitet wird.
+- Frage optional, ob der Kunde eine neue Bestellung aufgeben möchte.
+
+4) BESTELLBESTÄTIGUNG UND WEITERE FRAGEN
+- Sobald alle Informationen vorliegen (Sorten + Stückzahlen + Abholzeit + Name + Telefonnummer),
+  erstelle eine saubere Bestellbestätigung:
+  - Auflistung der Sorten und Stücke
+  - Abholzeit
+  - Name
+  - Telefonnummer
+  - Gesamtpreis (siehe Preisliste unten)
+  - Hinweis: sinngemäß "Die Bezahlung erfolgt bei Abholung." / "Plaćanje pri preuzimanju." / "Payment upon pickup."
+- Wenn der Kunde NACH der Bestätigung weitere Fragen stellt (z.B. "Kann ich doch 1 Stück mehr nehmen?",
+  "Da li mogu pomjeriti vrijeme preuzimanja?"), beantworte sie und passe die aktuelle Bestellung entsprechend an.
+
+5) WENN DU ETWAS NICHT VERSTEHST
+- Wenn die Nachricht unklar ist, rate NICHT.
+- Stelle stattdessen eine konkrete Rückfrage, um zu klären, was genau der Kunde möchte.
+  Beispiel: "Möchten Sie zusätzliche Stücke hinzufügen oder die Gesamtanzahl ändern?" /
+           "Da li želite još bureka ili da smanjimo postojeću količinu?"
+
+6) PREISE
+- Verwende diese Preise:
   * Burek mit Käse: 3,50 €
   * Burek mit Fleisch: 4,00 €
   * Burek mit Kartoffeln: 3,50 €
-- Schreibe am Ende höflich, dass die Bezahlung bei Abholung erfolgt.
-- Biete keine anderen Produkte an.
+- Wenn du einen Gesamtpreis nennst, stelle sicher, dass er zur aufgelisteten Bestellung passt.
+- Die Anwendung rechnet zusätzlich selbst – deine Aufgabe ist, dem Kunden eine klare, konsistente Antwort zu geben.
+
+7) EINSCHRÄNKUNG
+- Biete KEINE anderen Produkte an.
+- Antworte NICHT auf Themen außerhalb von Burek-Bestellungen (höflich ablenken).
+
+ZIEL:
+- Führe den Kunden so lange durch den Prozess, bis die Bestellung klar ist.
+- Bleibe höflich ansprechbar, solange der Kunde noch Fragen zur Bestellung hat.
     `,
   },
 };
 
-// --- Pomoćna funkcija: parsiranje količina iz CIJELOG razgovora ---
+// --- Pomoćna funkcija: parsiranje količina iz teksta ---
+function parseQuantities(text) {
+  const lower = (text || "").toLowerCase();
+
+  const extract = (re) => {
+    const m = lower.match(re);
+    return m ? Number(m[1]) || 0 : 0;
+  };
+
+  const kaese = extract(/(\d+)\s*(?:x|mal)?[^\d\n]{0,25}(käse|kaese|sir)/i);
+  const fleisch = extract(/(\d+)\s*(?:x|mal)?[^\d\n]{0,25}(fleisch|meso)/i);
+  const kartoffeln = extract(
+    /(\d+)\s*(?:x|mal)?[^\d\n]{0,25}(kartoffeln?|krumpir|krompir)/i
+  );
+
+  return { kaese, fleisch, kartoffeln };
+}
+
+// --- Parsiranje količina iz CIJELOG razgovora ---
 function parseQuantitiesFromConversation(userHistory, lastMessage) {
   const allText =
     (userHistory || [])
@@ -74,19 +152,7 @@ function parseQuantitiesFromConversation(userHistory, lastMessage) {
     "\n" +
     (lastMessage || "");
 
-  const text = allText.toLowerCase();
-
-  const extract = (re) => {
-    const m = text.match(re);
-    return m ? Number(m[1]) || 0 : 0;
-  };
-
-  // npr: "2x Burek mit Käse", "1 x mit Fleisch", "3 Stück Kartoffeln"
-  const kaese = extract(/(\d+)\s*(?:x|mal)?[^\d\n]{0,25}(käse|kaese)/i);
-  const fleisch = extract(/(\d+)\s*(?:x|mal)?[^\d\n]{0,25}fleisch/i);
-  const kartoffeln = extract(/(\d+)\s*(?:x|mal)?[^\d\n]{0,25}kartoffeln?/i);
-
-  return { kaese, fleisch, kartoffeln };
+  return parseQuantities(allText);
 }
 
 // --- WIDGET.JS endpoint (chat s historyjem) ---
@@ -230,10 +296,55 @@ app.post("/api/chat", async (req, res) => {
       message = "",
       history = [],
     } = req.body || {};
-
     const p = PROJECTS[projectId] || PROJECTS["burek01"];
 
-    // pripremi history (user + assistant)
+    const normalized = (message || "").trim().toLowerCase();
+
+    // --- 1) Kratke "OK / Danke / Thanks / Hvala" poruke -> odgovor bez OpenAI ---
+    const isClosing =
+      normalized &&
+      (
+        normalized === "ok" ||
+        normalized === "ok!" ||
+        normalized === "okay" ||
+        normalized === "okay!" ||
+        normalized === "okej" ||
+        normalized === "okej!" ||
+        normalized.startsWith("danke") ||
+        normalized.startsWith("vielen dank") ||
+        normalized.includes("danke,") ||
+        normalized.includes("danke.") ||
+        normalized.includes("danke!") ||
+        normalized === "thanks" ||
+        normalized === "thanks!" ||
+        normalized === "thank you" ||
+        normalized === "thank you!" ||
+        normalized.startsWith("hvala") ||
+        normalized.includes("hvala!")
+      );
+
+    if (isClosing) {
+      const reply =
+        "Gerne, Ihre Bestellung ist gespeichert. Einen schönen Tag noch und bis zum nächsten Mal!";
+
+      if (supabase) {
+        try {
+          await supabase.from("orders").insert({
+            project_id: projectId,
+            user_message: message,
+            ai_reply: reply,
+            items: null,
+            total: null,
+          });
+        } catch (dbErr) {
+          console.error("Supabase insert error (closing):", dbErr);
+        }
+      }
+
+      return res.json({ reply, total: null });
+    }
+
+    // --- History priprema za OpenAI ---
     const safeHistory = Array.isArray(history)
       ? history
           .filter((m) => m && typeof m.content === "string")
@@ -243,8 +354,7 @@ app.post("/api/chat", async (req, res) => {
           }))
       : [];
 
-    // OpenAI poruke: system + history + nova user poruka
-    const messages = [
+    const messagesForAI = [
       { role: "system", content: p.systemPrompt },
       ...safeHistory,
       { role: "user", content: message },
@@ -252,12 +362,12 @@ app.post("/api/chat", async (req, res) => {
 
     const ai = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      messages,
+      messages: messagesForAI,
     });
 
     let reply = ai.choices?.[0]?.message?.content || "OK.";
 
-    // Izračunaj količine iz CIJELOG user historyja + zadnje poruke
+    // Izračunaj količine i total iz CIJELOG user historyja + zadnje poruke
     const userHistory = safeHistory.filter((m) => m.role === "user");
     const { kaese, fleisch, kartoffeln } = parseQuantitiesFromConversation(
       userHistory,
@@ -270,7 +380,6 @@ app.post("/api/chat", async (req, res) => {
       fleisch * (prices.fleisch || 0) +
       kartoffeln * (prices.kartoffeln || 0);
 
-    // Dodaj jednu jasnu liniju sa cijenom (bez dupliranja)
     if (total > 0 && !reply.includes("Gesamtpreis")) {
       const parts = [];
       if (kaese) parts.push(kaese + "x Käse");
@@ -278,9 +387,9 @@ app.post("/api/chat", async (req, res) => {
       if (kartoffeln) parts.push(kartoffeln + "x Kartoffeln");
 
       reply +=
-        "\n\nVorläufiger Gesamtpreis für " +
+        "\n\nVorläufiger Gesamtpreis für die aktuelle Bestellung (" +
         parts.join(", ") +
-        ": " +
+        "): " +
         total.toFixed(2) +
         " € (Richtwert, Zahlung bei Abholung).";
     }
