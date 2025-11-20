@@ -1,5 +1,3 @@
-// server.js – Oplend AI (više jezika + history + izmjene/storno + OK/Danke)
-
 import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
@@ -22,13 +20,13 @@ const { OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
 // OpenAI client
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-// Supabase client (samo ako su postavljene varijable)
+// Supabase client
 const supabase =
   SUPABASE_URL && SUPABASE_SERVICE_KEY
     ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
     : null;
 
-// --- Konfiguracija projekta ---
+// --- Konfiguracija projekata ---
 const PROJECTS = {
   burek01: {
     lang: "multi",
@@ -41,90 +39,16 @@ Du bist ein Bestell-Assistent für eine Bäckerei. Du bearbeitest ausschließlic
 3) Burek mit Kartoffeln
 
 SPRACHE (SEHR WICHTIG):
-- Der Kunde darf in verschiedenen Sprachen schreiben (z.B. Deutsch, Englisch, Bosnisch, Kroatisch, Serbisch).
-- Antworte IMMER in der gleichen Sprache wie in der LETZTEN Nachricht des Kunden:
-  * Wenn der Kunde auf Deutsch schreibt -> antworte auf Deutsch.
-  * Wenn der Kunde auf Englisch schreibt -> antworte auf Englisch.
-  * Ako piše na bosanskom/hrvatskom/srpskom -> odgovaraj na tom jeziku.
-- Ako je poruka miješana, izaberi glavni jezik poruke i drži se njega.
-- Nemoj mijenjati jezik usred razgovora, osim ako korisnik to izričito zatraži.
+- Antworte IMMER in der gleichen Sprache wie in der letzten Nachricht des Kunden.
+- Ako piše na bosanskom/hrvatskom/srpskom – odgovaraj na tom jeziku.
 
-DU KANNST FOLGENDE AKTIONEN AUSFÜHREN:
-- Neue Bestellung aufnehmen
-- Eine bestehende Bestellung ERWEITERN (zusätzliche Stücke)
-- Eine bestehende Bestellung REDUZIEREN (weniger Stücke)
-- Eine bestehende Bestellung KOMPLETT STORNIEREN
-- Rückfragen zur bestehenden Bestellung beantworten (z.B. Zeit, Menge, Inhalt)
+(ostatak tvog system prompta…)
 
-WICHTIGE REGELN:
-
-1) NEUE BESTELLUNG
-- Wenn noch keine Bestellung vorliegt, frage nach:
-  - Sorten (Käse / Fleisch / Kartoffeln)
-  - Stückzahlen
-  - Abholzeit
-  - Name
-  - Telefonnummer
-- Erkläre kurz die Preise, wenn es hilfreich ist.
-
-2) BESTEHENDE BESTELLUNG ÄNDERN
-- Achte auf Wörter wie: "noch", "zusätzlich", "mehr", "weniger", "abziehen", "reduzieren",
-  "ändern", "korrigieren", "doch lieber", "stattdessen", "još", "više", "manje".
-- Wenn der Kunde so eine Änderung beschreibt, gehe wie folgt vor:
-  a) Sage in eigenen Worten, was du verstanden hast (z.B. "Sie möchten also einen Käse-Burek hinzufügen.").
-  b) FRAGE NACH, ob es sich um:
-     - eine ERGÄNZUNG zur bisherigen Bestellung handelt ("zusätzlich"),
-     - oder um eine NEUE GESAMTZAHL ("insgesamt").
-  c) Nachdem alles klar ist, fasse die AKTUELLE BESTELLUNG in einer Liste zusammen:
-     - z.B. "2x Käse, 1x Fleisch, 1x Kartoffeln".
-  d) Wenn sich durch die Änderung der Gesamtpreis ändert, nenne den NEUEN Gesamtpreis.
-
-3) STORNIERUNG
-- Achte auf Ausdrücke wie: "stornieren", "abbrechen", "komplett löschen", "doch keine Bestellung",
-  "bitte alles annullieren", "keine Bureks mehr", "storno", "otkaži", "poništi".
-- Bestätige eindeutig:
-  - dass die Bestellung STORNIERT ist,
-  - dass keine Ware vorbereitet wird.
-- Frage optional, ob der Kunde eine neue Bestellung aufgeben möchte.
-
-4) BESTELLBESTÄTIGUNG UND WEITERE FRAGEN
-- Sobald alle Informationen vorliegen (Sorten + Stückzahlen + Abholzeit + Name + Telefonnummer),
-  erstelle eine saubere Bestellbestätigung:
-  - Auflistung der Sorten und Stücke
-  - Abholzeit
-  - Name
-  - Telefonnummer
-  - Gesamtpreis (siehe Preisliste unten)
-  - Hinweis: sinngemäß "Die Bezahlung erfolgt bei Abholung." / "Plaćanje pri preuzimanju." / "Payment upon pickup."
-- Wenn der Kunde NACH der Bestätigung weitere Fragen stellt (z.B. "Kann ich doch 1 Stück mehr nehmen?",
-  "Da li mogu pomjeriti vrijeme preuzimanja?"), beantworte sie und passe die aktuelle Bestellung entsprechend an.
-
-5) WENN DU ETWAS NICHT VERSTEHST
-- Wenn die Nachricht unklar ist, rate NICHT.
-- Stelle stattdessen eine konkrete Rückfrage, um zu klären, was genau der Kunde möchte.
-  Beispiel: "Möchten Sie zusätzliche Stücke hinzufügen oder die Gesamtanzahl ändern?" /
-           "Da li želite još bureka ili da smanjimo postojeću količinu?"
-
-6) PREISE
-- Verwende diese Preise:
-  * Burek mit Käse: 3,50 €
-  * Burek mit Fleisch: 4,00 €
-  * Burek mit Kartoffeln: 3,50 €
-- Wenn du einen Gesamtpreis nennst, stelle sicher, dass er zur aufgelisteten Bestellung passt.
-- Die Anwendung rechnet zusätzlich selbst – deine Aufgabe ist, dem Kunden eine klare, konsistente Antwort zu geben.
-
-7) EINSCHRÄNKUNG
-- Biete KEINE anderen Produkte an.
-- Antworte NICHT auf Themen außerhalb von Burek-Bestellungen (höflich ablenken).
-
-ZIEL:
-- Führe den Kunden so lange durch den Prozess, bis die Bestellung klar ist.
-- Bleibe höflich ansprechbar, solange der Kunde noch Fragen zur Bestellung hat.
     `,
   },
 };
 
-// --- Pomoćna funkcija: parsiranje količina iz teksta ---
+// --- Pomoćne funkcije ---
 function parseQuantities(text) {
   const lower = (text || "").toLowerCase();
 
@@ -142,7 +66,6 @@ function parseQuantities(text) {
   return { kaese, fleisch, kartoffeln };
 }
 
-// --- Parsiranje količina iz CIJELOG razgovora ---
 function parseQuantitiesFromConversation(userHistory, lastMessage) {
   const allText =
     (userHistory || [])
@@ -155,7 +78,7 @@ function parseQuantitiesFromConversation(userHistory, lastMessage) {
   return parseQuantities(allText);
 }
 
-// --- WIDGET.JS endpoint (chat s historyjem) ---
+// --- WIDGET.JS ---
 app.get("/widget.js", (req, res) => {
   const js = `
 (function(){
@@ -163,10 +86,8 @@ app.get("/widget.js", (req, res) => {
   const projectId = script.getAttribute('data-project') || 'burek01';
   const host = script.src.split("/widget.js")[0];
 
-  // History poruka (user + assistant)
   const history = [];
 
-  // CHAT KUTIJA
   const box = document.createElement('div');
   box.style.cssText = "max-width:900px;margin:0 auto;border:1px solid #ddd;border-radius:10px;overflow:hidden;font-family:Arial, sans-serif";
 
@@ -207,30 +128,29 @@ app.get("/widget.js", (req, res) => {
     chat.scrollTop = chat.scrollHeight;
   }
 
-  // UČITAJ CONFIG (opis + welcome)
   fetch(host + "/api/projects/" + projectId + "/config")
-    .then(function(r){ return r.json(); })
-    .then(function(cfg){
+    .then(r => r.json())
+    .then(cfg => {
       var welcome = cfg.welcome || "Willkommen! Was darf’s sein?";
       desc.textContent = cfg.description || "";
       add("assistant", welcome);
       history.push({ role: "assistant", content: welcome });
     })
-    .catch(function(err){
+    .catch(err => {
       console.error("Config error:", err);
       var welcome = "Willkommen! Was darf’s sein?";
       add("assistant", welcome);
       history.push({ role: "assistant", content: welcome });
     });
 
-  // SLANJE PORUKE
   async function send(){
     var text = input.value.trim();
     if(!text) return;
 
     input.value = "";
     add("user", text);
-    history.push({ role: "user", content: text });
+
+    const localHistory = [...history, { role: "user", content: text }];
 
     var row = document.createElement("div");
     row.style.margin = "8px 0";
@@ -246,7 +166,7 @@ app.get("/widget.js", (req, res) => {
         body: JSON.stringify({
           projectId: projectId,
           message: text,
-          history: history
+          history: localHistory
         })
       });
 
@@ -254,10 +174,12 @@ app.get("/widget.js", (req, res) => {
       var reply = j.reply || "OK.";
 
       bubble.textContent = reply;
+
+      history.push({ role: "user", content: text });
       history.push({ role: "assistant", content: reply });
 
     } catch (err) {
-      bubble.textContent = "Es tut mir leid, ein Fehler ist aufgetreten.";
+      bubble.textContent = "Fehler aufgetreten.";
       console.error("Chat error:", err);
     }
   }
@@ -276,7 +198,7 @@ app.get("/widget.js", (req, res) => {
   res.send(js);
 });
 
-// --- Config endpoint za widget ---
+// --- Config endpoint ---
 app.get("/api/projects/:id/config", (req, res) => {
   const p = PROJECTS[req.params.id] || PROJECTS["burek01"];
 
@@ -288,19 +210,15 @@ app.get("/api/projects/:id/config", (req, res) => {
   });
 });
 
-// --- CHAT endpoint sa history podrškom ---
+// --- CHAT endpoint ---
 app.post("/api/chat", async (req, res) => {
   try {
-    const {
-      projectId = "burek01",
-      message = "",
-      history = [],
-    } = req.body || {};
+    const { projectId = "burek01", message = "", history = [] } = req.body || {};
     const p = PROJECTS[projectId] || PROJECTS["burek01"];
 
     const normalized = (message || "").trim().toLowerCase();
 
-    // --- 1) Kratke "OK / Danke / Thanks / Hvala" poruke -> odgovor bez OpenAI ---
+    // OK/Danke/Hvala → instant odgovor
     const isClosing =
       normalized &&
       (
@@ -312,20 +230,15 @@ app.post("/api/chat", async (req, res) => {
         normalized === "okej!" ||
         normalized.startsWith("danke") ||
         normalized.startsWith("vielen dank") ||
-        normalized.includes("danke,") ||
-        normalized.includes("danke.") ||
-        normalized.includes("danke!") ||
+        normalized.includes("danke") ||
         normalized === "thanks" ||
-        normalized === "thanks!" ||
         normalized === "thank you" ||
-        normalized === "thank you!" ||
-        normalized.startsWith("hvala") ||
-        normalized.includes("hvala!")
+        normalized.startsWith("hvala")
       );
 
     if (isClosing) {
       const reply =
-        "Gerne, Ihre Bestellung ist gespeichert. Einen schönen Tag noch und bis zum nächsten Mal!";
+        "Gerne, Ihre Bestellung ist gespeichert. Einen schönen Tag noch!";
 
       if (supabase) {
         try {
@@ -336,28 +249,21 @@ app.post("/api/chat", async (req, res) => {
             items: null,
             total: null,
           });
-        } catch (dbErr) {
-          console.error("Supabase insert error (closing):", dbErr);
-        }
+        } catch (dbErr) {}
       }
 
       return res.json({ reply, total: null });
     }
 
-    // --- History priprema za OpenAI ---
+    // --- History priprema ---
     const safeHistory = Array.isArray(history)
-      ? history
-          .filter((m) => m && typeof m.content === "string")
-          .map((m) => ({
-            role: m.role === "assistant" ? "assistant" : "user",
-            content: m.content,
-          }))
+      ? history.filter((m) => m && typeof m.content === "string")
       : [];
 
+    // ❗ FIX: više NE dodajemo zadnju poruku ponovo – već je u historyju
     const messagesForAI = [
       { role: "system", content: p.systemPrompt },
-      ...safeHistory,
-      { role: "user", content: message },
+      ...safeHistory
     ];
 
     const ai = await openai.chat.completions.create({
@@ -367,18 +273,17 @@ app.post("/api/chat", async (req, res) => {
 
     let reply = ai.choices?.[0]?.message?.content || "OK.";
 
-    // Izračunaj količine i total iz CIJELOG user historyja + zadnje poruke
+    // --- Izračun total ---
     const userHistory = safeHistory.filter((m) => m.role === "user");
     const { kaese, fleisch, kartoffeln } = parseQuantitiesFromConversation(
       userHistory,
       message
     );
     const prices = p.pricing || {};
-
     const total =
-      kaese * (prices.kaese || 0) +
-      fleisch * (prices.fleisch || 0) +
-      kartoffeln * (prices.kartoffeln || 0);
+      kaese * prices.kaese +
+      fleisch * prices.fleisch +
+      kartoffeln * prices.kartoffeln;
 
     if (total > 0 && !reply.includes("Gesamtpreis")) {
       const parts = [];
@@ -387,14 +292,13 @@ app.post("/api/chat", async (req, res) => {
       if (kartoffeln) parts.push(kartoffeln + "x Kartoffeln");
 
       reply +=
-        "\n\nVorläufiger Gesamtpreis für die aktuelle Bestellung (" +
+        "\n\nVorläufiger Gesamtpreis (" +
         parts.join(", ") +
         "): " +
         total.toFixed(2) +
-        " € (Richtwert, Zahlung bei Abholung).";
+        " €.";
     }
 
-    // Spremi u Supabase (ako je dostupan)
     if (supabase) {
       try {
         await supabase.from("orders").insert({
@@ -404,14 +308,12 @@ app.post("/api/chat", async (req, res) => {
           items: { kaese, fleisch, kartoffeln },
           total: total > 0 ? total : null,
         });
-      } catch (dbErr) {
-        console.error("Supabase insert error:", dbErr);
-      }
+      } catch (dbErr) {}
     }
 
     res.json({ reply, total: total > 0 ? total : null });
+
   } catch (e) {
-    console.error("CHAT ERROR:", e);
     res.status(500).json({ error: e.message });
   }
 });
