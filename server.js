@@ -1,8 +1,9 @@
-// server.js – stable version (widget.js mobile fix + demo page + multi-language + "je li to sve" flow)
+// server.js – stable version (widget.js mobile fix + demo page + multi-language + "je li to sve" flow + Supabase logging)
 
 import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
+import { createClient } from "@supabase/supabase-js";
 
 // ----------------------------
 //  APP & CONFIG
@@ -12,9 +13,17 @@ const app = express();
 app.use(express.json());
 app.use(cors({ origin: "*", methods: "*", allowedHeaders: "*" }));
 
+const { OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
+
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: OPENAI_API_KEY,
 });
+
+// Supabase client (opcionalno, ako env postoji)
+const supabase =
+  SUPABASE_URL && SUPABASE_SERVICE_KEY
+    ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    : null;
 
 const PROJECTS = {
   burek01: {
@@ -213,6 +222,25 @@ app.post("/api/chat", async (req, res) => {
       reply += `
 
 Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
+    }
+
+    // --- SUPABASE LOGGING ---
+    if (supabase) {
+      try {
+        await supabase.from("orders").insert({
+          project_id: projectId,
+          user_message: message,
+          ai_reply: reply,
+          items: {
+            kaese: qty.kaese,
+            fleisch: qty.fleisch,
+            kartoffeln: qty.kartoffeln,
+          },
+          total: total || null,
+        });
+      } catch (dbErr) {
+        console.error("Supabase insert error:", dbErr);
+      }
     }
 
     return res.json({ reply, total: total || null });
