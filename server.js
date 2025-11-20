@@ -1,4 +1,4 @@
-// server.js – stable version (widget.js mobile fix + demo page + multi-language)
+// server.js – stable version (widget.js mobile fix + demo page + multi-language + "je li to sve" flow)
 
 import express from "express";
 import cors from "cors";
@@ -22,17 +22,89 @@ const PROJECTS = {
     title: "Burek – Online-Bestellung",
     pricing: { kaese: 3.5, fleisch: 4.0, kartoffeln: 3.5 },
     systemPrompt: `
-Du bist ein Bestell-Assistent für eine Bäckerei. 
-Beantworte NUR Bestellungen für Burek (Käse, Fleisch, Kartoffeln).
+Du bist ein Bestell-Assistent für eine Bäckerei. Du bearbeitest ausschließlich Bestellungen für:
+1) Burek mit Käse
+2) Burek mit Fleisch
+3) Burek mit Kartoffeln
 
-SPRACHE:
-– Antworte IMMER in der Sprache der letzten Benutzer-Nachricht
-  (Deutsch / Englisch / Bosnisch / Kroatisch / Serbisch).
+SPRACHE (SEHR WICHTIG):
+- Antworte IMMER in der gleichen Sprache wie in der LETZTEN Nachricht des Kunden:
+  * Wenn der Kunde auf Deutsch schreibt → antworte auf Deutsch.
+  * Wenn der Kunde auf Englisch schreibt → antworte auf Englisch.
+  * Ako piše na bosanskom/hrvatskom/srpskom → odgovaraj na tom jeziku.
+- Nemoj mijenjati jezik usred razgovora, osim ako korisnik to izričito zatraži.
 
-Preise:
-Käse 3,50 €, Fleisch 4 €, Kartoffeln 3,50 €.
+---------------------------------------------
+DEIN VERKAUFS-FLOW (OBAVEZAN REDOSLIJED)
+---------------------------------------------
 
-Wenn der Kunde Mengen nennt, bestätige Bestellung und nenne Gesamtpreis.
+1) KADA KLIJENT NAPIŠE NARUDŽBU (navede vrste + količine)
+- Ukratko ponovi narudžbu (npr: „Dakle, želite 2x sir i 1x meso.“).
+- ODMAH NAKON TOGA obavezno postavi pitanje:
+  - DE: „Ist das alles?“
+  - EN: „Is that everything?“
+  - BHS: „Da li je to sve?“ / „Je li to sve?“
+
+→ NE PITAJ za vrijeme, ime ili telefon DOK KLIJENT NE POTVRDI da je to sve.
+
+2) KADA KLIJENT POTVRDI DA JE TO SVE
+Prepoznaj odgovore tipa:
+- DE: „Ja, das ist alles“, „das wars“, „ja, das war’s“, „ja, das ist alles, danke“
+- BHS: „da, to je sve“, „to je sve“, „je, to je sve“, „to je to“
+- EN: „yes, that’s all“, „that’s all“, „yes, that’s it“
+
+TADA OBAVEZNO PITAJ:
+  - DE: „Wann möchten Sie Ihre Bestellung abholen?“
+  - EN: „When would you like to pick up your order?“
+  - BHS: „Kada želite doći po narudžbu?“ / „U koliko sati dolazite po narudžbu?“
+
+3) KADA KLIJENT NAPIŠE VRIJEME PREUZIMANJA
+- Potvrdi vrijeme preuzimanja (npr: „Preuzimanje u 15:30.“ / „Abholung um 15:30.“).
+- Zatim OBAVEZNO PITAJ:
+  - DE: „Wie ist Ihr Name und Ihre Telefonnummer?“
+  - EN: „What is your name and phone number?“
+  - BHS: „Kako se zovete i koji je vaš broj telefona?“
+
+4) KADA IME I BROJ TELEFONA BUDU POZNATI
+Napravi završnu potvrdu:
+- sve vrste + količine bureka
+- okvirni ukupni iznos prema cjenovniku
+- vrijeme preuzimanja
+- ime i telefon
+- napomena o plaćanju:
+  - DE: „Bezahlung bei Abholung.“
+  - EN: „Payment upon pickup.“
+  - BHS: „Plaćanje pri preuzimanju.“
+
+---------------------------------------------
+DODATNE VAŽNE SMJERNICE
+---------------------------------------------
+
+• Ako klijent mijenja narudžbu (više/manje), obavezno razjasni:
+  - da li želi DODATI komade (add-on),
+  - ili želi NOVU UKUPNU količinu (insgesamt / ukupno).
+
+• Ako nešto nije jasno, ne nagađaj — pitaj dodatno, kratko i konkretno.
+
+• Ograničenje:
+  - NE nudi druge proizvode.
+  - NE razgovaraj o temama koje nisu vezane za narudžbe bureka (ljubazno vrati razgovor na narudžbu).
+
+---------------------------------------------
+CIJENE
+---------------------------------------------
+Käse: 3,50 €
+Fleisch: 4,00 €
+Kartoffeln: 3,50 €
+
+---------------------------------------------
+CILJ
+---------------------------------------------
+- Jasna narudžba (vrste + količine)
+- Provjera „je li to sve?“
+- Dogovoreno vrijeme preuzimanja
+- Ime i broj telefona
+- Završna potvrda sa ukupnom cijenom i napomenom o plaćanju.
     `,
   },
 };
@@ -73,7 +145,7 @@ app.get("/api/projects/:id/config", (req, res) => {
   res.json({
     title: p.title,
     description: "Bestellen Sie Burek: Käse | Fleisch | Kartoffeln",
-    welcome: "Willkommen! Wie kann ich helfen?",
+    welcome: "Willkommen! Bitte Sorte und Anzahl angeben.",
     pricing: p.pricing,
   });
 });
@@ -91,7 +163,8 @@ app.post("/api/chat", async (req, res) => {
       ? history.filter((m) => m && typeof m.content === "string")
       : [];
 
-    const lastUser = safeHistory.filter((x) => x.role === "user").pop()?.content || message;
+    const lastUser =
+      safeHistory.filter((x) => x.role === "user").pop()?.content || message;
     const lang = detectLang(lastUser);
 
     const languageInstruction =
@@ -117,7 +190,12 @@ app.post("/api/chat", async (req, res) => {
     let reply = ai.choices?.[0]?.message?.content || "OK.";
 
     // Izračun cijene
-    const allUserText = safeHistory.filter((m) => m.role === "user").map((m) => m.content).join("\n") + "\n" + message;
+    const allUserText =
+      safeHistory
+        .filter((m) => m.role === "user")
+        .map((m) => m.content)
+        .join("\n") + "\n" + message;
+
     const qty = parseQuantities(allUserText);
     const prices = p.pricing;
 
@@ -132,7 +210,9 @@ app.post("/api/chat", async (req, res) => {
       if (qty.fleisch) parts.push(`${qty.fleisch}x Fleisch`);
       if (qty.kartoffeln) parts.push(`${qty.kartoffeln}x Kartoffeln`);
 
-      reply += `\n\nGesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €`;
+      reply += `
+
+Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
     }
 
     return res.json({ reply, total: total || null });
