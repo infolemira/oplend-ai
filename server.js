@@ -2,6 +2,7 @@
 // widget.js mobile fix + multi-language
 // "je li to sve" flow + Supabase + hashirani password
 // + zaštita broja telefona + otkazivanje / izmjena prethodne narudžbe
+// + BACKEND je jedini koji odlučuje je li password tačan
 
 import express from "express";
 import cors from "cors";
@@ -64,7 +65,12 @@ STANDARDNI FLOW NOVE NARUDŽBE
 → NE PITAJ za vrijeme, ime ili telefon DOK KLIJENT NE POTVRDI da je to sve.
 
 2) KADA KLIJENT POTVRDI DA JE TO SVE
-- TADA PITAJ:
+Prepoznaj odgovore tipa:
+- DE: „Ja, das ist alles“, „das wars“, „ja, das war’s“, „ja, das ist alles, danke“
+- BHS: „da, to je sve“, „to je sve“, „je, to je sve“, „to je to“
+- EN: „yes, that’s all“, „that’s all“, „yes, that’s it“
+
+TADA PITAJ:
   - DE: „Wann möchten Sie Ihre Bestellung abholen?“
   - EN: „When would you like to pick up your order?“
   - BHS: „Kada želite doći po narudžbu?“ / „U koliko sati dolazite po narudžbu?“
@@ -87,7 +93,7 @@ PASSWORD LOGIKA (BROJ TELEFONA = JEDAN KLIJENT)
 
 NOVI KLIJENT (broj telefona NEMA password u bazi):
 - Nakon što dobiješ ime + broj telefona:
-  - Objasni da treba postaviti lozinku (password) za buduće narudžbe.
+  - Objasni da treba postaviti password za buduće narudžbe.
   - Pitaj: „Molim vas unesite password koji želite koristiti ubuduće.“
   - Kad je korisnik unese → u META stavi: passwordAction = "set", password = "..."
   - NE traži password ponovo na kraju iste narudžbe.
@@ -103,9 +109,18 @@ POSTOJEĆI KLIJENT (broj telefona VEĆ IMA password u bazi):
 ZABORAVLJEN PASSWORD:
 - Ako korisnik kaže da je zaboravio password:
   - NE mijenjaj password.
-  - Ljubazno objasni da zbog sigurnosti novi password može dobiti tek nakon ručne provjere u pekari (telefon / lično).
+  - Ljubazno objasni da novi password dobija tek nakon ručne provjere u pekari (telefon / lično).
   - U META: newPasswordRequested = true.
-  - Ako password ne odgovara, narudžbu nemoj smatrati finalnom.
+
+⚠️ VEOMA VAŽNO:
+- TI KAO ASISTENT NE ZNAŠ da li je password ispravan ili ne.
+- NIKADA ne smiješ reći:
+  - „password nije ispravan“, „pogrešna lozinka“, „lozinka ne odgovara“,
+  - niti odbiti narudžbu uz obrazloženje da je password netačan.
+- Tvoja jedina uloga je:
+  - tražiti password kad je potrebno
+  - upisati ga u META polje "password" i "passwordAction"
+  - backend sistem će provjeriti ispravnost i eventualno korisniku javiti da lozinka nije tačna.
 
 ---------------------------------------------
 ZAVRŠNA POTVRDA NARUDŽBE
@@ -113,10 +128,10 @@ ZAVRŠNA POTVRDA NARUDŽBE
 
 - Kada su poznati:
   - vrste + količine bureka
-  - ukupna cijena (prema cjenovniku)
+  - okvirna ukupna cijena (prema cjenovniku)
   - vrijeme preuzimanja
   - ime i broj telefona
-  - i (za postojećeg klijenta) password je ispravan
+  - (za postojećeg klijenta) password je unijet i sistem ga je prihvatio
 
 → napravi završnu potvrdu i u META stavi:
   - isFinalOrder = true
@@ -140,7 +155,9 @@ TADA:
 1) Traži broj telefona.
 2) Provjeri (interno, preko sistema) da li je za taj broj već postojao password.
 3) Ako postoji password → traži da unese password za potvrdu identiteta.
-4) Tek ako password odgovara → nastavi:
+   - Kada ga korisnik unese, OBAVEZNO u META upiši:
+     - passwordAction = "confirm"
+     - password = uneseni tekst.
 
 OTKAZIVANJE:
 - Ako želi potpuno anulirati zadnju potvrđenu narudžbu:
@@ -153,7 +170,7 @@ OTKAZIVANJE:
 IZMJENA:
 - Ako želi promijeniti zadnju potvrđenu narudžbu:
   - Jasno pitaj novu željenu kombinaciju (vrste + količine, eventualno novo vrijeme).
-  - Nakon što nova kombinacija bude jasna i password potvrđen:
+  - Kada nova kombinacija bude jasna i password je unijet:
     - U META:
       - orderAction = "modify_last"
       - isFinalOrder = true
@@ -161,7 +178,7 @@ IZMJENA:
 
 VAŽNO:
 - Otkazivanje ili izmjena vrijedi samo dok narudžba NIJE označena kao isporučena (interno, preko sistema).
-- Ako sistem javi da je narudžba već isporučena, objasni korisniku da otkazivanje/izmjena nije više moguća.
+- Ako sistem javi da je narudžba već isporučena, TI samo objasni da izmjena/otkazivanje nije moguće.
 
 ---------------------------------------------
 TECHNICAL METADATA (VRLO VAŽNO)
@@ -412,8 +429,20 @@ Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
         );
         if (!ok) {
           isFinalized = false;
-          reply +=
-            "\n\nDas angegebene Passwort stimmt leider nicht. Ihre Bestellung wurde nicht endgültig bestätigt. Bitte wenden Sie sich direkt an die Bäckerei, um ein neues Passwort zu erhalten.";
+
+          let wrongPwMsg;
+          if (lang === "bhs") {
+            wrongPwMsg =
+              "Nažalost, password koji ste unijeli nije ispravan. Vaša narudžba nije konačno potvrđena. Molimo vas da kontaktirate pekaru (telefon ili lično) kako biste dobili novi password.";
+          } else if (lang === "en") {
+            wrongPwMsg =
+              "Unfortunately, the password you entered is not correct. Your order has not been finalized. Please contact the bakery (by phone or in person) to receive a new password.";
+          } else {
+            wrongPwMsg =
+              "Das angegebene Passwort stimmt leider nicht. Ihre Bestellung wurde nicht endgültig bestätigt. Bitte wenden Sie sich direkt an die Bäckerei (Telefon oder persönlich), um ein neues Passwort zu erhalten.";
+          }
+
+          reply += "\n\n" + wrongPwMsg;
         }
       } catch (e) {
         console.error("Password compare error:", e);
@@ -441,9 +470,8 @@ Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
         if (!lastErr && lastOrders && lastOrders.length > 0) {
           const lastOrder = lastOrders[0];
 
-          // ako je već isporučena, ne diramo je (AI bi već trebao objasniti da ne može)
+          // ako je već isporučena, ne diramo je
           if (!lastOrder.is_delivered) {
-            // označi zadnju narudžbu kao otkazanu / zamijenjenu
             await supabase
               .from("orders")
               .update({
@@ -564,7 +592,7 @@ app.get("/widget.js", (req, res) => {
 
     const row = document.createElement("div");
     row.style.margin = "8px 0";
-    row.innerHTML = "<div style='padding:10px 12px;border-radius:12px;border:1px solid #eee;background:white'>…</div>";
+    row.innerHTML = "<div style='padding:10px 12px;border-radius:12px;border:1px solid:#eee;background:white'>…</div>";
     chat.appendChild(row);
     chat.scrollTop = chat.scrollHeight;
     const bubble = row.querySelector("div");
