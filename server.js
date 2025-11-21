@@ -62,7 +62,7 @@ IZBJEGAVAJ PONAVLJANJE ISTIH PITANJA
   - Ako je korisnik već napisao broj telefona: ne pitaj opet "koji je vaš broj telefona?".
   - Ako je korisnik već napisao ime: ne pitaj ponovno "kako se zovete?", osim ako kaže da je prethodni podatak kriv.
   - Ako je korisnik već jednom unio password u ovom chatu i backend ga je prihvatio
-    (vidićeš po tome što je narudžba potvrđena), NE traži ponovo password za istu narudžbu.
+    (vidjet ćeš po tome što je narudžba potvrđena), NE traži ponovo password za istu narudžbu.
 - Kada korisnik ispravlja narudžbu u NOVOM chatu:
   - Jednom tražiš broj telefona i password, nakon toga ih VIŠE NE PONAVLJAŠ u tom razgovoru.
 
@@ -110,7 +110,7 @@ NOVI KLIJENT (broj telefona NEMA password u bazi):
 - Nakon što dobiješ ime + broj telefona:
   - Objasni da treba postaviti password za buduće narudžbe.
   - Pitaj: "Molim vas unesite password koji želite koristiti ubuduće."
-  - Kad je korisnik unese → u META stavi: passwordAction = "set", password = "..."
+  - Kad ga korisnik unese → u META stavi: passwordAction = "set", password = "..."
   - NE traži password ponovo na kraju iste narudžbe.
 
 POSTOJEĆI KLIJENT (broj telefona VEĆ IMA password u bazi):
@@ -259,7 +259,7 @@ function detectPhone(text) {
 }
 
 // ----------------------------
-//  CONFIG ENDPOINT (HR / DE / EN)
+//  CONFIG ENDPOINT (HR / DE / EN preko ?lang=)
 // ----------------------------
 
 app.get("/api/projects/:id/config", (req, res) => {
@@ -292,7 +292,7 @@ app.get("/api/projects/:id/config", (req, res) => {
 });
 
 // ----------------------------
-//  CHAT ENDPOINT
+//  CHAT ENDPOINT (poštuje ?lang=)
 // ----------------------------
 
 app.post("/api/chat", async (req, res) => {
@@ -307,7 +307,24 @@ app.post("/api/chat", async (req, res) => {
     const lastUser =
       safeHistory.filter((x) => x.role === "user").pop()?.content || message;
 
-    const lang = detectLang(lastUser);
+    // prisilni jezik iz query parametra (hr/de/en)
+    const forcedLangRaw = (req.query.lang || "").toLowerCase();
+    let forcedLang = null;
+    if (["hr", "de", "en"].includes(forcedLangRaw)) {
+      forcedLang = forcedLangRaw;
+    }
+
+    let lang;
+    if (forcedLang === "de") {
+      lang = "de";
+    } else if (forcedLang === "en") {
+      lang = "en";
+    } else if (forcedLang === "hr") {
+      lang = "bhs"; // naš prompt koristi "bhs" za bosanski/hrvatski/srpski
+    } else {
+      lang = detectLang(lastUser);
+    }
+
     const languageInstruction =
       lang === "de"
         ? "Antworte ausschließlich auf Deutsch."
@@ -600,9 +617,9 @@ app.get("/widget.js", (req, res) => {
     "<div id='opl-desc' style='margin-top:6px;color:#555;font-size:14px'></div>" +
     "</div>" +
     "<div id='opl-chat' style='height:60vh;overflow:auto;padding:12px;background:#fafafa'></div>" +
-    "<div style='display:flex;gap:8px;padding:12px;border-top:1px solid #eee;background:white'>" +
-    "<textarea id='opl-in' placeholder='" + ui.placeholder + "' style='flex:1;min-height:44px;border:1px solid #ddd;border-radius:8px;padding:10px'></textarea>" +
-    "<button id='opl-send' type='button' style='padding:10px 16px;border:1px solid #222;background:#222;color:white;border-radius:8px;cursor:pointer'>" + ui.send + "</button>" +
+    "<div style='display:flex;gap:8px;padding:12px;border-top:1px solid:#eee;background:white'>" +
+    "<textarea id='opl-in' placeholder='" + ui.placeholder + "' style='flex:1;min-height:44px;border:1px solid:#ddd;border-radius:8px;padding:10px'></textarea>" +
+    "<button id='opl-send' type='button' style='padding:10px 16px;border:1px solid:#222;background:#222;color:white;border-radius:8px;cursor:pointer'>" + ui.send + "</button>" +
     "</div>";
 
   script.parentNode.insertBefore(box, script);
@@ -632,10 +649,10 @@ app.get("/widget.js", (req, res) => {
     chat.scrollTop = chat.scrollHeight;
   }
 
-  // Load config
+  // Load config (sa lang parametrom)
   fetch(host + "/api/projects/" + projectId + "/config?lang=" + lang)
-    .then(r => r.json())
-    .then(cfg => {
+    .then(function(r){ return r.json(); })
+    .then(function(cfg){
       const welcome = cfg.welcome;
       desc.textContent = cfg.description;
       add("assistant", welcome);
@@ -658,7 +675,7 @@ app.get("/widget.js", (req, res) => {
     const bubble = row.querySelector("div");
 
     try {
-      const r = await fetch(host + "/api/chat", {
+      const r = await fetch(host + "/api/chat?lang=" + lang, {
         method: "POST",
         headers: {"Content-Type":"application/json"},
         body: JSON.stringify({ projectId, message: text, history })
@@ -688,7 +705,7 @@ app.get("/widget.js", (req, res) => {
 });
 
 // ----------------------------
-//  DEMO PAGE (HR / DE / EN)
+//  DEMO PAGE (HR / DE / EN preko ?lang=)
 // ----------------------------
 
 app.get("/demo", (req, res) => {
