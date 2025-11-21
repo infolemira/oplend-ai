@@ -1,6 +1,7 @@
 // server.js – Oplend AI
-// widget.js mobile fix + demo page + multi-language
-// + "je li to sve" flow + Supabase + hashirani password
+// widget.js mobile fix + multi-language
+// "je li to sve" flow + Supabase + hashirani password
+// + zaštita broja telefona + otkazivanje / izmjena prethodne narudžbe
 
 import express from "express";
 import cors from "cors";
@@ -26,7 +27,6 @@ const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
 });
 
-// Supabase client
 const supabase =
   SUPABASE_URL && SUPABASE_SERVICE_KEY
     ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
@@ -51,7 +51,7 @@ SPRACHE (SEHR WICHTIG):
 - Nemoj mijenjati jezik usred razgovora, osim ako korisnik to izričito zatraži.
 
 ---------------------------------------------
-DEIN VERKAUFS-FLOW (OBAVEZAN REDOSLIJED)
+STANDARDNI FLOW NOVE NARUDŽBE
 ---------------------------------------------
 
 1) KADA KLIJENT NAPIŠE NARUDŽBU (vrste + količine)
@@ -64,74 +64,104 @@ DEIN VERKAUFS-FLOW (OBAVEZAN REDOSLIJED)
 → NE PITAJ za vrijeme, ime ili telefon DOK KLIJENT NE POTVRDI da je to sve.
 
 2) KADA KLIJENT POTVRDI DA JE TO SVE
-Prepoznaj odgovore tipa:
-- DE: „Ja, das ist alles“, „das wars“, „ja, das war’s“, „ja, das ist alles, danke“
-- BHS: „da, to je sve“, „to je sve“, „je, to je sve“, „to je to“
-- EN: „yes, that’s all“, „that’s all“, „yes, that’s it“
-
-TADA OBAVEZNO PITAJ:
+- TADA PITAJ:
   - DE: „Wann möchten Sie Ihre Bestellung abholen?“
   - EN: „When would you like to pick up your order?“
   - BHS: „Kada želite doći po narudžbu?“ / „U koliko sati dolazite po narudžbu?“
 
 3) KADA KLIJENT NAPIŠE VRIJEME PREUZIMANJA
-- Potvrdi vrijeme preuzimanja (npr: „Preuzimanje u 15:30.“ / „Abholung um 15:30.“).
-- Zatim OBAVEZNO PITAJ:
+- Potvrdi vrijeme (npr: „Abholung um 15:30.“ / „Preuzimanje u 15:30.“).
+- Zatim PITAJ:
   - DE: „Wie ist Ihr Name und Ihre Telefonnummer?“
   - EN: „What is your name and phone number?“
   - BHS: „Kako se zovete i koji je vaš broj telefona?“
 
-4) PASSWORD LOGIKA (VRLO VAŽNO)
+---------------------------------------------
+PASSWORD LOGIKA (BROJ TELEFONA = JEDAN KLIJENT)
+---------------------------------------------
 
-- Broj telefona služi kao identifikacija klijenta.
-- APP razlikuje:
-  a) NOVI KLIJENT (broj telefona još nije registriran)
-  b) POSTOJEĆI KLIJENT (broj je već u bazi i ima password)
+- Identitet klijenta je kombinacija: BROJ TELEFONA + PASSWORD.
+- Broj telefona može pripadati SAMO jednom passwordu (jednom klijentu).
+- Ako je broj telefona već registriran (ima password u sistemu),
+  ne smiješ postavljati novi password za taj broj – samo traži postojeći.
 
-NOVI KLIJENT (nema password u bazi):
+NOVI KLIJENT (broj telefona NEMA password u bazi):
 - Nakon što dobiješ ime + broj telefona:
-  - Ljubazno objasni da treba postaviti password za buduće narudžbe.
-  - Traži ga: npr. „Molim vas unesite password koji želite koristiti ubuduće.“
-  - Kada ga korisnik unese → passwordAction = "set".
-  - NE traži password ponovo na kraju narudžbe (ne duplirati).
+  - Objasni da treba postaviti lozinku (password) za buduće narudžbe.
+  - Pitaj: „Molim vas unesite password koji želite koristiti ubuduće.“
+  - Kad je korisnik unese → u META stavi: passwordAction = "set", password = "..."
+  - NE traži password ponovo na kraju iste narudžbe.
 
-POSTOJEĆI KLIJENT (broj postoji u bazi, ima password):
+POSTOJEĆI KLIJENT (broj telefona VEĆ IMA password u bazi):
 - NE traži novi password.
-- Normalno vodi narudžbu (vrste + količine → da li je to sve → vrijeme → ime + telefon).
+- Vodi normalni flow (vrste + količine → je li to sve → vrijeme → ime + telefon).
 - PRIJE ZAVRŠNE POTVRDE narudžbe:
-  - Traži od klijenta da POTVRDI narudžbu svojim postojećim passwordom.
-  - „Molim potvrdite svoju narudžbu unošenjem vašeg passworda.“
-  - Kada ga unese → passwordAction = "confirm".
+  - Zamoli da POTVRDI narudžbu svojim POSTOJEĆIM passwordom.
+  - npr: „Molim potvrdite svoju narudžbu unošenjem vašeg passworda.“
+  - Kada ga unese → META: passwordAction = "confirm", password = "..."
 
 ZABORAVLJEN PASSWORD:
 - Ako korisnik kaže da je zaboravio password:
-  - Nemoj pokušavati resetovati automatski.
-  - Lijepo objasni da novi password dobija tek nakon ručne provjere u pekari (telefon / lično).
-  - newPasswordRequested = true.
-  - Ako password NE ODGOVARA, narudžbu NEMOJ smatrati finalnom.
+  - NE mijenjaj password.
+  - Ljubazno objasni da zbog sigurnosti novi password može dobiti tek nakon ručne provjere u pekari (telefon / lično).
+  - U META: newPasswordRequested = true.
+  - Ako password ne odgovara, narudžbu nemoj smatrati finalnom.
 
-5) KADA IME, TELEFON, VRIJEME I PASSWORD (ako je potreban) BUDU POZNATI
-- Ako je sve jasno i (kod postojećeg klijenta) password je ispravan:
-  - Napravi završnu potvrdu:
-    - sve vrste + količine bureka
-    - okvirni ukupni iznos prema cjenovniku
-    - vrijeme preuzimanja
-    - ime i telefon
-    - napomena o plaćanju:
-      - DE: „Bezahlung bei Abholung.“
-      - EN: „Payment upon pickup.“
-      - BHS: „Plaćanje pri preuzimanju.“
-    - isFinalOrder = true
+---------------------------------------------
+ZAVRŠNA POTVRDA NARUDŽBE
+---------------------------------------------
 
-- Nakon završne potvrde:
-  - Zahvali se.
-  - Jasno reci da je ovaj chat sada ZATVOREN za ovu narudžbu.
-  - Objasni da za nove promjene ili nova pitanja treba otvoriti NOVI chat.
+- Kada su poznati:
+  - vrste + količine bureka
+  - ukupna cijena (prema cjenovniku)
+  - vrijeme preuzimanja
+  - ime i broj telefona
+  - i (za postojećeg klijenta) password je ispravan
+
+→ napravi završnu potvrdu i u META stavi:
+  - isFinalOrder = true
   - closeChat = true
 
-Ako korisnik NAKON ZATVARANJA chata ipak nastavi pisati u istom razgovoru:
-- NE postavljaj ponovo pitanja za ime / telefon / password.
-- Samo ljubazno reci da je ovaj chat zatvoren i da treba otvoriti novi chat za nove narudžbe ili promjene.
+U odgovoru JASNO reci da je:
+- narudžba potvrđena
+- plaćanje pri preuzimanju
+- ovaj chat sada je ZATVOREN za ovu narudžbu
+- za nova pitanja ili izmjene treba otvoriti NOVI chat.
+
+---------------------------------------------
+OTKAZIVANJE / IZMJENA PRETHODNE NARUDŽBE
+---------------------------------------------
+
+Ako korisnik u NOVOM chatu napiše da želi:
+- otkazati prethodnu narudžbu
+- ili ispraviti / promijeniti prethodnu narudžbu
+
+TADA:
+1) Traži broj telefona.
+2) Provjeri (interno, preko sistema) da li je za taj broj već postojao password.
+3) Ako postoji password → traži da unese password za potvrdu identiteta.
+4) Tek ako password odgovara → nastavi:
+
+OTKAZIVANJE:
+- Ako želi potpuno anulirati zadnju potvrđenu narudžbu:
+  - Objasni da ćeš otkazati NJEGOVU POSLJEDNJU potvrđenu narudžbu koja još nije isporučena.
+  - U META stavi:
+    - orderAction = "cancel_last"
+    - isFinalOrder = true
+    - closeChat = true
+
+IZMJENA:
+- Ako želi promijeniti zadnju potvrđenu narudžbu:
+  - Jasno pitaj novu željenu kombinaciju (vrste + količine, eventualno novo vrijeme).
+  - Nakon što nova kombinacija bude jasna i password potvrđen:
+    - U META:
+      - orderAction = "modify_last"
+      - isFinalOrder = true
+      - (closeChat = true nakon završne potvrde)
+
+VAŽNO:
+- Otkazivanje ili izmjena vrijedi samo dok narudžba NIJE označena kao isporučena (interno, preko sistema).
+- Ako sistem javi da je narudžba već isporučena, objasni korisniku da otkazivanje/izmjena nije više moguća.
 
 ---------------------------------------------
 TECHNICAL METADATA (VRLO VAŽNO)
@@ -142,7 +172,7 @@ die GENAU SO beginnt:
 
 ##META {JSON}
 
-- JSON ist ein kompaktes Objekt mit folgenden Keys:
+JSON Objekt mit:
   - "phone": string oder null
   - "name": string oder null
   - "pickupTime": string oder null
@@ -151,9 +181,10 @@ die GENAU SO beginnt:
   - "isFinalOrder": true/false
   - "closeChat": true/false
   - "newPasswordRequested": true/false
+  - "orderAction": "none" | "cancel_last" | "modify_last"
 
 BEISPIEL:
-##META {"phone":"+491761234567","name":"Marko","pickupTime":"15:30","passwordAction":"confirm","password":"mojaSifra123","isFinalOrder":true,"closeChat":true,"newPasswordRequested":false}
+##META {"phone":"+491761234567","name":"Marko","pickupTime":"15:30","passwordAction":"confirm","password":"mojaSifra123","isFinalOrder":true,"closeChat":true,"newPasswordRequested":false,"orderAction":"cancel_last"}
 
 - U ovoj liniji NE smije biti ništa osim "##META " i JSON objekta.
 - Ovu liniju NE objašnjavaš korisniku. Ona je samo za sistem.
@@ -234,6 +265,7 @@ app.post("/api/chat", async (req, res) => {
         ? "Odgovaraj isključivo na bosanskom/hrvatskom/srpskom jeziku."
         : "Antwort in der Sprache der letzten Benutzer-Nachricht.";
 
+    // --- Detekcija telefona za lookup ---
     const allUserTextForPhone =
       safeHistory
         .filter((m) => m.role === "user")
@@ -261,6 +293,7 @@ app.post("/api/chat", async (req, res) => {
       }
     }
 
+    // internal status za model
     let internalUserStatusMessage = null;
     if (phoneCandidate) {
       internalUserStatusMessage = {
@@ -331,7 +364,7 @@ app.post("/api/chat", async (req, res) => {
 Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
     }
 
-    // --- PASSWORD LOGIKA NA BACKENDU ---
+    // --- PASSWORD / ORDER META NA BACKENDU ---
     let phoneToStore =
       (meta && meta.phone) || phoneCandidate || null;
     let nameToStore = meta && meta.name ? meta.name : null;
@@ -344,11 +377,15 @@ Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
         : false;
 
     let passwordHashToStore = existingPasswordHash || null;
+    const orderAction =
+      (meta && meta.orderAction) || "none";
+    const passwordAction =
+      (meta && meta.passwordAction) || "none";
 
-    // SET new password
+    // 1) SET new password (samo ako taj broj do sada NEMA password)
     if (
+      passwordAction === "set" &&
       meta &&
-      meta.passwordAction === "set" &&
       meta.password &&
       phoneToStore &&
       !existingPasswordHash
@@ -361,10 +398,10 @@ Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
       }
     }
 
-    // CONFIRM existing password
+    // 2) CONFIRM existing password (postojeći klijent)
     if (
+      passwordAction === "confirm" &&
       meta &&
-      meta.passwordAction === "confirm" &&
       meta.password &&
       existingPasswordHash
     ) {
@@ -383,7 +420,44 @@ Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
       }
     }
 
-    // --- SUPABASE LOGGING ---
+    // 3) ORDER-AKTIONEN (cancel / modify)
+    if (
+      supabase &&
+      phoneToStore &&
+      (orderAction === "cancel_last" ||
+        orderAction === "modify_last")
+    ) {
+      try {
+        // nađi POSLJEDNJU finaliziranu narudžbu za ovaj broj
+        const { data: lastOrders, error: lastErr } =
+          await supabase
+            .from("orders")
+            .select("id, is_delivered, is_cancelled")
+            .eq("user_phone", phoneToStore)
+            .eq("is_finalized", true)
+            .order("created_at", { ascending: false })
+            .limit(1);
+
+        if (!lastErr && lastOrders && lastOrders.length > 0) {
+          const lastOrder = lastOrders[0];
+
+          // ako je već isporučena, ne diramo je (AI bi već trebao objasniti da ne može)
+          if (!lastOrder.is_delivered) {
+            // označi zadnju narudžbu kao otkazanu / zamijenjenu
+            await supabase
+              .from("orders")
+              .update({
+                is_cancelled: true,
+              })
+              .eq("id", lastOrder.id);
+          }
+        }
+      } catch (e) {
+        console.error("Supabase update (cancel/modify) error:", e);
+      }
+    }
+
+    // --- SUPABASE LOGGING (nova "akcija" / narudžba) ---
     if (supabase) {
       try {
         await supabase.from("orders").insert({
@@ -400,7 +474,9 @@ Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
           user_name: nameToStore,
           pickup_time: pickupTimeToStore,
           is_finalized: isFinalized,
-          password: passwordHashToStore, // HASH, ne plain
+          is_cancelled: orderAction === "cancel_last" ? true : false,
+          is_delivered: false,
+          password: passwordHashToStore,
         });
       } catch (dbErr) {
         console.error("Supabase insert error:", dbErr);
