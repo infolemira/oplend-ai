@@ -1,9 +1,12 @@
-// server.js – stable version (widget.js mobile fix + demo page + multi-language + "je li to sve" flow + Supabase logging)
+// server.js – Oplend AI
+// widget.js mobile fix + demo page + multi-language
+// + "je li to sve" flow + Supabase + hashirani password
 
 import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
+import bcrypt from "bcryptjs";
 
 // ----------------------------
 //  APP & CONFIG
@@ -13,13 +16,17 @@ const app = express();
 app.use(express.json());
 app.use(cors({ origin: "*", methods: "*", allowedHeaders: "*" }));
 
-const { OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
+const {
+  OPENAI_API_KEY,
+  SUPABASE_URL,
+  SUPABASE_SERVICE_KEY,
+} = process.env;
 
 const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
 });
 
-// Supabase client (opcionalno, ako env postoji)
+// Supabase client
 const supabase =
   SUPABASE_URL && SUPABASE_SERVICE_KEY
     ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
@@ -47,7 +54,7 @@ SPRACHE (SEHR WICHTIG):
 DEIN VERKAUFS-FLOW (OBAVEZAN REDOSLIJED)
 ---------------------------------------------
 
-1) KADA KLIJENT NAPIŠE NARUDŽBU (navede vrste + količine)
+1) KADA KLIJENT NAPIŠE NARUDŽBU (vrste + količine)
 - Ukratko ponovi narudžbu (npr: „Dakle, želite 2x sir i 1x meso.“).
 - ODMAH NAKON TOGA obavezno postavi pitanje:
   - DE: „Ist das alles?“
@@ -74,46 +81,82 @@ TADA OBAVEZNO PITAJ:
   - EN: „What is your name and phone number?“
   - BHS: „Kako se zovete i koji je vaš broj telefona?“
 
-4) KADA IME I BROJ TELEFONA BUDU POZNATI
-Napravi završnu potvrdu:
-- sve vrste + količine bureka
-- okvirni ukupni iznos prema cjenovniku
-- vrijeme preuzimanja
-- ime i telefon
-- napomena o plaćanju:
-  - DE: „Bezahlung bei Abholung.“
-  - EN: „Payment upon pickup.“
-  - BHS: „Plaćanje pri preuzimanju.“
+4) PASSWORD LOGIKA (VRLO VAŽNO)
+
+- Broj telefona služi kao identifikacija klijenta.
+- APP razlikuje:
+  a) NOVI KLIJENT (broj telefona još nije registriran)
+  b) POSTOJEĆI KLIJENT (broj je već u bazi i ima password)
+
+NOVI KLIJENT (nema password u bazi):
+- Nakon što dobiješ ime + broj telefona:
+  - Ljubazno objasni da treba postaviti password za buduće narudžbe.
+  - Traži ga: npr. „Molim vas unesite password koji želite koristiti ubuduće.“
+  - Kada ga korisnik unese → passwordAction = "set".
+  - NE traži password ponovo na kraju narudžbe (ne duplirati).
+
+POSTOJEĆI KLIJENT (broj postoji u bazi, ima password):
+- NE traži novi password.
+- Normalno vodi narudžbu (vrste + količine → da li je to sve → vrijeme → ime + telefon).
+- PRIJE ZAVRŠNE POTVRDE narudžbe:
+  - Traži od klijenta da POTVRDI narudžbu svojim postojećim passwordom.
+  - „Molim potvrdite svoju narudžbu unošenjem vašeg passworda.“
+  - Kada ga unese → passwordAction = "confirm".
+
+ZABORAVLJEN PASSWORD:
+- Ako korisnik kaže da je zaboravio password:
+  - Nemoj pokušavati resetovati automatski.
+  - Lijepo objasni da novi password dobija tek nakon ručne provjere u pekari (telefon / lično).
+  - newPasswordRequested = true.
+  - Ako password NE ODGOVARA, narudžbu NEMOJ smatrati finalnom.
+
+5) KADA IME, TELEFON, VRIJEME I PASSWORD (ako je potreban) BUDU POZNATI
+- Ako je sve jasno i (kod postojećeg klijenta) password je ispravan:
+  - Napravi završnu potvrdu:
+    - sve vrste + količine bureka
+    - okvirni ukupni iznos prema cjenovniku
+    - vrijeme preuzimanja
+    - ime i telefon
+    - napomena o plaćanju:
+      - DE: „Bezahlung bei Abholung.“
+      - EN: „Payment upon pickup.“
+      - BHS: „Plaćanje pri preuzimanju.“
+    - isFinalOrder = true
+
+- Nakon završne potvrde:
+  - Zahvali se.
+  - Jasno reci da je ovaj chat sada ZATVOREN za ovu narudžbu.
+  - Objasni da za nove promjene ili nova pitanja treba otvoriti NOVI chat.
+  - closeChat = true
+
+Ako korisnik NAKON ZATVARANJA chata ipak nastavi pisati u istom razgovoru:
+- NE postavljaj ponovo pitanja za ime / telefon / password.
+- Samo ljubazno reci da je ovaj chat zatvoren i da treba otvoriti novi chat za nove narudžbe ili promjene.
 
 ---------------------------------------------
-DODATNE VAŽNE SMJERNICE
+TECHNICAL METADATA (VRLO VAŽNO)
 ---------------------------------------------
 
-• Ako klijent mijenja narudžbu (više/manje), obavezno razjasni:
-  - da li želi DODATI komade (add-on),
-  - ili želi NOVU UKUPNU količinu (insgesamt / ukupno).
+Am ENDE JEDER ANTWORT musst du EINE zusätzliche Zeile ausgeben,
+die GENAU SO beginnt:
 
-• Ako nešto nije jasno, ne nagađaj — pitaj dodatno, kratko i konkretno.
+##META {JSON}
 
-• Ograničenje:
-  - NE nudi druge proizvode.
-  - NE razgovaraj o temama koje nisu vezane za narudžbe bureka (ljubazno vrati razgovor na narudžbu).
+- JSON ist ein kompaktes Objekt mit folgenden Keys:
+  - "phone": string oder null
+  - "name": string oder null
+  - "pickupTime": string oder null
+  - "passwordAction": "none" | "set" | "confirm"
+  - "password": string oder null
+  - "isFinalOrder": true/false
+  - "closeChat": true/false
+  - "newPasswordRequested": true/false
 
----------------------------------------------
-CIJENE
----------------------------------------------
-Käse: 3,50 €
-Fleisch: 4,00 €
-Kartoffeln: 3,50 €
+BEISPIEL:
+##META {"phone":"+491761234567","name":"Marko","pickupTime":"15:30","passwordAction":"confirm","password":"mojaSifra123","isFinalOrder":true,"closeChat":true,"newPasswordRequested":false}
 
----------------------------------------------
-CILJ
----------------------------------------------
-- Jasna narudžba (vrste + količine)
-- Provjera „je li to sve?“
-- Dogovoreno vrijeme preuzimanja
-- Ime i broj telefona
-- Završna potvrda sa ukupnom cijenom i napomenom o plaćanju.
+- U ovoj liniji NE smije biti ništa osim "##META " i JSON objekta.
+- Ovu liniju NE objašnjavaš korisniku. Ona je samo za sistem.
     `,
   },
 };
@@ -145,6 +188,12 @@ function detectLang(text) {
   return "auto";
 }
 
+function detectPhone(text) {
+  const m = (text || "").match(/(\+?\d[\d\s/\-]{6,})/);
+  if (!m) return null;
+  return m[1].replace(/[^\d+]/g, "");
+}
+
 // ----------------------------
 //  CONFIG ENDPOINT
 // ----------------------------
@@ -174,8 +223,8 @@ app.post("/api/chat", async (req, res) => {
 
     const lastUser =
       safeHistory.filter((x) => x.role === "user").pop()?.content || message;
-    const lang = detectLang(lastUser);
 
+    const lang = detectLang(lastUser);
     const languageInstruction =
       lang === "de"
         ? "Antworte ausschließlich auf Deutsch."
@@ -185,11 +234,56 @@ app.post("/api/chat", async (req, res) => {
         ? "Odgovaraj isključivo na bosanskom/hrvatskom/srpskom jeziku."
         : "Antwort in der Sprache der letzten Benutzer-Nachricht.";
 
+    const allUserTextForPhone =
+      safeHistory
+        .filter((m) => m.role === "user")
+        .map((m) => m.content)
+        .join("\n") + "\n" + message;
+
+    const phoneCandidate = detectPhone(allUserTextForPhone);
+    let existingPasswordHash = null;
+
+    if (phoneCandidate && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from("orders")
+          .select("password")
+          .eq("user_phone", phoneCandidate)
+          .not("password", "is", null)
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        if (!error && data && data.length > 0) {
+          existingPasswordHash = data[0].password;
+        }
+      } catch (e) {
+        console.error("Supabase select error (password lookup):", e);
+      }
+    }
+
+    let internalUserStatusMessage = null;
+    if (phoneCandidate) {
+      internalUserStatusMessage = {
+        role: "system",
+        content:
+          "INTERNAL_USER_STATUS: phone=" +
+          phoneCandidate +
+          ", hasPassword=" +
+          (existingPasswordHash ? "true" : "false") +
+          ". Verwende diese Info NUR intern, um zu entscheiden, ob der Kunde ein NEUES Passwort setzen soll (falls hasPassword=false) oder sein bestehendes Passwort NUR EINMAL zur Bestätigung der Bestellung eingeben soll (falls hasPassword=true). Erkläre diese interne Info dem Kunden NICHT.",
+      };
+    }
+
     const messagesForAI = [
       { role: "system", content: p.systemPrompt },
       { role: "system", content: languageInstruction },
-      ...safeHistory, // VEĆ sadrži zadnju user poruku — NE dodajemo je duplo
     ];
+
+    if (internalUserStatusMessage) {
+      messagesForAI.push(internalUserStatusMessage);
+    }
+
+    messagesForAI.push(...safeHistory);
 
     const ai = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -198,14 +292,27 @@ app.post("/api/chat", async (req, res) => {
 
     let reply = ai.choices?.[0]?.message?.content || "OK.";
 
-    // Izračun cijene
-    const allUserText =
+    // --- META PARSING ---
+    let meta = null;
+    const metaMatch = reply.match(/##META\s+(\{[\s\S]*\})\s*$/);
+    if (metaMatch) {
+      const jsonStr = metaMatch[1];
+      try {
+        meta = JSON.parse(jsonStr);
+      } catch (e) {
+        console.error("META parse error:", e);
+      }
+      reply = reply.replace(/##META[\s\S]*$/, "").trim();
+    }
+
+    // --- Izračun cijene ---
+    const allUserTextForQty =
       safeHistory
         .filter((m) => m.role === "user")
         .map((m) => m.content)
         .join("\n") + "\n" + message;
 
-    const qty = parseQuantities(allUserText);
+    const qty = parseQuantities(allUserTextForQty);
     const prices = p.pricing;
 
     const total =
@@ -224,6 +331,58 @@ app.post("/api/chat", async (req, res) => {
 Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
     }
 
+    // --- PASSWORD LOGIKA NA BACKENDU ---
+    let phoneToStore =
+      (meta && meta.phone) || phoneCandidate || null;
+    let nameToStore = meta && meta.name ? meta.name : null;
+    let pickupTimeToStore =
+      meta && meta.pickupTime ? meta.pickupTime : null;
+
+    let isFinalized =
+      meta && typeof meta.isFinalOrder === "boolean"
+        ? meta.isFinalOrder
+        : false;
+
+    let passwordHashToStore = existingPasswordHash || null;
+
+    // SET new password
+    if (
+      meta &&
+      meta.passwordAction === "set" &&
+      meta.password &&
+      phoneToStore &&
+      !existingPasswordHash
+    ) {
+      try {
+        const hash = await bcrypt.hash(meta.password, 10);
+        passwordHashToStore = hash;
+      } catch (e) {
+        console.error("Password hash error:", e);
+      }
+    }
+
+    // CONFIRM existing password
+    if (
+      meta &&
+      meta.passwordAction === "confirm" &&
+      meta.password &&
+      existingPasswordHash
+    ) {
+      try {
+        const ok = await bcrypt.compare(
+          meta.password,
+          existingPasswordHash
+        );
+        if (!ok) {
+          isFinalized = false;
+          reply +=
+            "\n\nDas angegebene Passwort stimmt leider nicht. Ihre Bestellung wurde nicht endgültig bestätigt. Bitte wenden Sie sich direkt an die Bäckerei, um ein neues Passwort zu erhalten.";
+        }
+      } catch (e) {
+        console.error("Password compare error:", e);
+      }
+    }
+
     // --- SUPABASE LOGGING ---
     if (supabase) {
       try {
@@ -237,6 +396,11 @@ Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
             kartoffeln: qty.kartoffeln,
           },
           total: total || null,
+          user_phone: phoneToStore,
+          user_name: nameToStore,
+          pickup_time: pickupTimeToStore,
+          is_finalized: isFinalized,
+          password: passwordHashToStore, // HASH, ne plain
         });
       } catch (dbErr) {
         console.error("Supabase insert error:", dbErr);
