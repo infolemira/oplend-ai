@@ -184,7 +184,7 @@ OTKAZIVANJE:
 
 IZMJENA:
 - Ako želi promijeniti zadnju potvrđenu narudžbu:
-  - Jasno pitaj novu željenu kombinaciju (vrste + količine, eventualno novo vrijeme).
+  - Jasno pitaj novu kombinaciju (vrste + količine, eventualno novo vrijeme).
   - Kada nova kombinacija bude jasna i password je unijet:
     - U META:
       - orderAction = "modify_last"
@@ -259,15 +259,34 @@ function detectPhone(text) {
 }
 
 // ----------------------------
-//  CONFIG ENDPOINT
+//  CONFIG ENDPOINT (HR / DE / EN)
 // ----------------------------
 
 app.get("/api/projects/:id/config", (req, res) => {
   const p = PROJECTS[req.params.id] || PROJECTS["burek01"];
+  const lang = (req.query.lang || "hr").toLowerCase();
+
+  let title, description, welcome;
+
+  if (lang === "de") {
+    title = "Burek – Online-Bestellung";
+    description = "Bestellen Sie Burek: Käse | Fleisch | Kartoffeln";
+    welcome = "Willkommen! Bitte geben Sie Sorte und Anzahl der Bureks ein.";
+  } else if (lang === "en") {
+    title = "Burek – online ordering";
+    description = "Order burek: cheese | meat | potato";
+    welcome = "Welcome! Please enter the type of burek and number of pieces.";
+  } else {
+    // HR default
+    title = "Burek – online narudžba";
+    description = "Naručite burek: sir | meso | krumpir";
+    welcome = "Dobrodošli! Molimo upišite vrstu bureka i broj komada.";
+  }
+
   res.json({
-    title: "Burek – online narudžba",
-    description: "Naručite burek: sir | meso | krumpir",
-    welcome: "Dobrodošli! Molimo upišite vrstu bureka i broj komada.",
+    title,
+    description,
+    welcome,
     pricing: p.pricing,
   });
 });
@@ -536,7 +555,7 @@ Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
 });
 
 // ----------------------------
-//  widget.js (sa mobile fix)
+//  widget.js (sa mobile fix + lang)
 // ----------------------------
 
 app.get("/widget.js", (req, res) => {
@@ -545,6 +564,30 @@ app.get("/widget.js", (req, res) => {
   const script = document.currentScript;
   const projectId = script.getAttribute("data-project") || "burek01";
   const host = script.src.split("/widget.js")[0];
+  const lang = (script.getAttribute("data-lang") || "hr").toLowerCase();
+
+  const texts = {
+    hr: {
+      header: "Chat narudžba",
+      placeholder: "Poruka...",
+      send: "Pošalji",
+      error: "Došlo je do greške pri slanju."
+    },
+    de: {
+      header: "Chat-Bestellung",
+      placeholder: "Nachricht...",
+      send: "Senden",
+      error: "Fehler beim Senden."
+    },
+    en: {
+      header: "Chat order",
+      placeholder: "Message...",
+      send: "Send",
+      error: "Error while sending."
+    }
+  };
+
+  const ui = texts[lang] || texts.hr;
 
   const history = [];
 
@@ -553,13 +596,13 @@ app.get("/widget.js", (req, res) => {
 
   box.innerHTML =
     "<div style='padding:14px 16px;border-bottom:1px solid #eee;background:white'>" +
-    "<h2 style='margin:0;font-size:22px'>Chat narudžba</h2>" +
+    "<h2 style='margin:0;font-size:22px'>" + ui.header + "</h2>" +
     "<div id='opl-desc' style='margin-top:6px;color:#555;font-size:14px'></div>" +
     "</div>" +
     "<div id='opl-chat' style='height:60vh;overflow:auto;padding:12px;background:#fafafa'></div>" +
     "<div style='display:flex;gap:8px;padding:12px;border-top:1px solid #eee;background:white'>" +
-    "<textarea id='opl-in' placeholder='Poruka...' style='flex:1;min-height:44px;border:1px solid #ddd;border-radius:8px;padding:10px'></textarea>" +
-    "<button id='opl-send' type='button' style='padding:10px 16px;border:1px solid #222;background:#222;color:white;border-radius:8px;cursor:pointer'>Pošalji</button>" +
+    "<textarea id='opl-in' placeholder='" + ui.placeholder + "' style='flex:1;min-height:44px;border:1px solid #ddd;border-radius:8px;padding:10px'></textarea>" +
+    "<button id='opl-send' type='button' style='padding:10px 16px;border:1px solid #222;background:#222;color:white;border-radius:8px;cursor:pointer'>" + ui.send + "</button>" +
     "</div>";
 
   script.parentNode.insertBefore(box, script);
@@ -590,7 +633,7 @@ app.get("/widget.js", (req, res) => {
   }
 
   // Load config
-  fetch(host + "/api/projects/" + projectId + "/config")
+  fetch(host + "/api/projects/" + projectId + "/config?lang=" + lang)
     .then(r => r.json())
     .then(cfg => {
       const welcome = cfg.welcome;
@@ -626,13 +669,13 @@ app.get("/widget.js", (req, res) => {
       history.push({ role:"assistant", content: j.reply });
 
     } catch (err) {
-      bubble.textContent = "Došlo je do greške pri slanju.";
+      bubble.textContent = ui.error;
     }
   }
 
   sendBtn.onclick = send;
 
-  input.addEventListener("keydown", e => {
+  input.addEventListener("keydown", function(e){
     if (e.key === "Enter" && !e.shiftKey){
       e.preventDefault();
       send();
@@ -645,10 +688,13 @@ app.get("/widget.js", (req, res) => {
 });
 
 // ----------------------------
-//  DEMO PAGE
+//  DEMO PAGE (HR / DE / EN)
 // ----------------------------
 
 app.get("/demo", (req, res) => {
+  const langRaw = (req.query.lang || "hr").toLowerCase();
+  const lang = ["hr", "de", "en"].includes(langRaw) ? langRaw : "hr";
+
   res.send(`
 <html>
   <head>
@@ -656,7 +702,7 @@ app.get("/demo", (req, res) => {
     <title>Burek chat</title>
   </head>
   <body style="margin:0;padding:0;">
-    <script src="/widget.js" data-project="burek01"></script>
+    <script src="/widget.js" data-project="burek01" data-lang="${lang}"></script>
   </body>
 </html>
   `);
