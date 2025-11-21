@@ -19,11 +19,7 @@ const app = express();
 app.use(express.json());
 app.use(cors({ origin: "*", methods: "*", allowedHeaders: "*" }));
 
-const {
-  OPENAI_API_KEY,
-  SUPABASE_URL,
-  SUPABASE_SERVICE_KEY,
-} = process.env;
+const { OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
 
 const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
@@ -250,7 +246,8 @@ function parseQuantities(text) {
 function detectLang(text) {
   const t = (text || "").toLowerCase();
   if (/[šđćčž]/.test(t)) return "bhs";
-  if (t.includes(" der ") || t.includes(" die ") || t.includes(" das ")) return "de";
+  if (t.includes(" der ") || t.includes(" die ") || t.includes(" das "))
+    return "de";
   if (t.includes("thanks") || t.includes("thank")) return "en";
   return "auto";
 }
@@ -268,9 +265,9 @@ function detectPhone(text) {
 app.get("/api/projects/:id/config", (req, res) => {
   const p = PROJECTS[req.params.id] || PROJECTS["burek01"];
   res.json({
-    title: p.title,
-    description: "Bestellen Sie Burek: Käse | Fleisch | Kartoffeln",
-    welcome: "Willkommen! Bitte Sorte und Anzahl angeben.",
+    title: "Burek – online narudžba",
+    description: "Naručite burek: sir | meso | krumpir",
+    welcome: "Dobrodošli! Molimo upišite vrstu bureka i broj komada.",
     pricing: p.pricing,
   });
 });
@@ -306,7 +303,9 @@ app.post("/api/chat", async (req, res) => {
       safeHistory
         .filter((m) => m.role === "user")
         .map((m) => m.content)
-        .join("\n") + "\n" + message;
+        .join("\n") +
+      "\n" +
+      message;
 
     const phoneCandidate = detectPhone(allUserTextForPhone);
     let existingPasswordHash = null;
@@ -379,7 +378,9 @@ app.post("/api/chat", async (req, res) => {
       safeHistory
         .filter((m) => m.role === "user")
         .map((m) => m.content)
-        .join("\n") + "\n" + message;
+        .join("\n") +
+      "\n" +
+      message;
 
     const qty = parseQuantities(allUserTextForQty);
     const prices = p.pricing;
@@ -403,8 +404,7 @@ Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
     }
 
     // --- PASSWORD / ORDER META NA BACKENDU ---
-    let phoneToStore =
-      (meta && meta.phone) || phoneCandidate || null;
+    let phoneToStore = (meta && meta.phone) || phoneCandidate || null;
     let nameToStore = meta && meta.name ? meta.name : null;
     let pickupTimeToStore =
       meta && meta.pickupTime ? meta.pickupTime : null;
@@ -415,10 +415,8 @@ Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
         : false;
 
     let passwordHashToStore = existingPasswordHash || null;
-    const orderAction =
-      (meta && meta.orderAction) || "none";
-    const passwordAction =
-      (meta && meta.passwordAction) || "none";
+    const orderAction = (meta && meta.orderAction) || "none";
+    const passwordAction = (meta && meta.passwordAction) || "none";
 
     // 1) SET new password (samo ako taj broj do sada NEMA password)
     if (
@@ -474,19 +472,17 @@ Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
     if (
       supabase &&
       phoneToStore &&
-      (orderAction === "cancel_last" ||
-        orderAction === "modify_last")
+      (orderAction === "cancel_last" || orderAction === "modify_last")
     ) {
       try {
         // nađi POSLJEDNJU finaliziranu narudžbu za ovaj broj
-        const { data: lastOrders, error: lastErr } =
-          await supabase
-            .from("orders")
-            .select("id, is_delivered, is_cancelled")
-            .eq("user_phone", phoneToStore)
-            .eq("is_finalized", true)
-            .order("created_at", { ascending: false })
-            .limit(1);
+        const { data: lastOrders, error: lastErr } = await supabase
+          .from("orders")
+          .select("id, is_delivered, is_cancelled")
+          .eq("user_phone", phoneToStore)
+          .eq("is_finalized", true)
+          .order("created_at", { ascending: false })
+          .limit(1);
 
         if (!lastErr && lastOrders && lastOrders.length > 0) {
           const lastOrder = lastOrders[0];
@@ -557,13 +553,13 @@ app.get("/widget.js", (req, res) => {
 
   box.innerHTML =
     "<div style='padding:14px 16px;border-bottom:1px solid #eee;background:white'>" +
-    "<h2 style='margin:0;font-size:22px'>Chat</h2>" +
+    "<h2 style='margin:0;font-size:22px'>Chat narudžba</h2>" +
     "<div id='opl-desc' style='margin-top:6px;color:#555;font-size:14px'></div>" +
     "</div>" +
     "<div id='opl-chat' style='height:60vh;overflow:auto;padding:12px;background:#fafafa'></div>" +
     "<div style='display:flex;gap:8px;padding:12px;border-top:1px solid #eee;background:white'>" +
-    "<textarea id='opl-in' placeholder='Nachricht...' style='flex:1;min-height:44px;border:1px solid #ddd;border-radius:8px;padding:10px'></textarea>" +
-    "<button id='opl-send' type='button' style='padding:10px 16px;border:1px solid #222;background:#222;color:white;border-radius:8px;cursor:pointer'>Senden</button>" +
+    "<textarea id='opl-in' placeholder='Poruka...' style='flex:1;min-height:44px;border:1px solid #ddd;border-radius:8px;padding:10px'></textarea>" +
+    "<button id='opl-send' type='button' style='padding:10px 16px;border:1px solid #222;background:#222;color:white;border-radius:8px;cursor:pointer'>Pošalji</button>" +
     "</div>";
 
   script.parentNode.insertBefore(box, script);
@@ -630,7 +626,7 @@ app.get("/widget.js", (req, res) => {
       history.push({ role:"assistant", content: j.reply });
 
     } catch (err) {
-      bubble.textContent = "Fehler beim Senden.";
+      bubble.textContent = "Došlo je do greške pri slanju.";
     }
   }
 
@@ -654,10 +650,15 @@ app.get("/widget.js", (req, res) => {
 
 app.get("/demo", (req, res) => {
   res.send(`
-<html><body>
-<h2>Oplend AI Demo</h2>
-<script src="/widget.js" data-project="burek01"></script>
-</body></html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Burek chat</title>
+  </head>
+  <body style="margin:0;padding:0;">
+    <script src="/widget.js" data-project="burek01"></script>
+  </body>
+</html>
   `);
 });
 
