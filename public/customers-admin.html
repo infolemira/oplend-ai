@@ -2,32 +2,131 @@
 <html lang="hr">
 <head>
   <meta charset="utf-8" />
-  <title>Oplend – Customers admin</title>
-  <link rel="stylesheet" href="/admin.css">
+  <title>Burek – kupci i kategorije</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f4f4f5;
+    }
+    header {
+      background: #10b981;
+      color: #fff;
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.2rem;
+    }
+    nav a {
+      color: #fff;
+      margin-left: 12px;
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+    .container {
+      max-width: 1100px;
+      margin: 16px auto;
+      padding: 0 12px 24px;
+    }
+    .top-bar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    select, input[type="text"] {
+      padding: 4px 8px;
+      font-size: 0.9rem;
+    }
+    button {
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid #d4d4d8;
+      background: #e4e4e7;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    button.primary {
+      background: #22c55e;
+      border-color: #16a34a;
+      color: #fff;
+    }
+    button.danger {
+      background: #ef4444;
+      border-color: #b91c1c;
+      color: #fff;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+      font-size: 0.85rem;
+    }
+    th, td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #e4e4e7;
+      vertical-align: top;
+    }
+    th {
+      background: #f4f4f5;
+      text-align: left;
+      white-space: nowrap;
+    }
+    tr:last-child td {
+      border-bottom: none;
+    }
+    .small-input {
+      width: 110px;
+    }
+    .wide-input {
+      width: 160px;
+    }
+  </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Customers admin</h1>
+  <header>
+    <h1>Burek – kupci i kategorije</h1>
+    <nav>
+      <a href="/admin">Narudžbe</a>
+      <a href="/admin/products">Proizvodi &amp; popusti</a>
+      <a href="/admin/customers">Kupci &amp; kategorije</a>
+    </nav>
+  </header>
 
-    <div class="top-links">
-      <a href="/admin">↩ Narudžbe</a>
-      <a href="/admin/products">📦 Proizvodi</a>
+  <div class="container">
+    <div class="top-bar">
+      <span><strong>Projekt:</strong></span>
+      <select id="project-select">
+        <option value="burek01">burek01</option>
+      </select>
+      <button id="btn-add" class="primary">Dodaj kupca</button>
     </div>
 
     <table id="customers-table">
       <thead>
         <tr>
+          <th>ID</th>
           <th>Telefon</th>
+          <th>PIN</th>
           <th>Ime</th>
-          <th>Kategorije (npr. student,vip)</th>
-          <th>Registriran</th>
-          <th>Spremi</th>
+          <th>Kategorije (npr. student,radnik)</th>
+          <th>Akcije</th>
         </tr>
       </thead>
-      <tbody></tbody>
+      <tbody>
+        <tr><td colspan="6">Učitavanje...</td></tr>
+      </tbody>
     </table>
-
-    <div id="status" class="status"></div>
   </div>
 
   <script src="/customers-admin.js"></script>
