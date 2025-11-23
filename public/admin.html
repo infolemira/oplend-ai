@@ -1,172 +1,258 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="hr">
-<head>
-  <meta charset="utf-8" />
-  <title>Burek – admin narudžbe</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    body {
-      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-      margin: 0;
-      padding: 0;
-      background: #f4f4f5;
-    }
-    header {
-      background: #f97316;
-      color: #fff;
-      padding: 12px 16px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    header h1 {
-      margin: 0;
-      font-size: 1.2rem;
-    }
-    nav a {
-      color: #fff;
-      margin-left: 12px;
-      text-decoration: none;
-      font-size: 0.9rem;
-    }
-    .container {
-      max-width: 1100px;
-      margin: 16px auto;
-      padding: 0 12px 24px;
-    }
-    .filters {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-bottom: 12px;
-      align-items: center;
-    }
-    select {
-      padding: 4px 8px;
-      font-size: 0.9rem;
-    }
-    button {
-      padding: 6px 10px;
-      border-radius: 6px;
-      border: 1px solid #d4d4d8;
-      background: #e4e4e7;
-      cursor: pointer;
-      font-size: 0.9rem;
-    }
-    button.primary {
-      background: #22c55e;
-      border-color: #16a34a;
-      color: #fff;
-    }
-    button.danger {
-      background: #ef4444;
-      border-color: #b91c1c;
-      color: #fff;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      background: #fff;
-      border-radius: 8px;
-      overflow: hidden;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-    }
-    th, td {
-      padding: 8px 10px;
-      font-size: 0.85rem;
-      border-bottom: 1px solid #e4e4e7;
-      vertical-align: top;
-    }
-    th {
-      background: #f4f4f5;
-      text-align: left;
-      white-space: nowrap;
-    }
-    tr:last-child td {
-      border-bottom: none;
-    }
-    .badge {
-      display: inline-block;
-      padding: 2px 6px;
-      border-radius: 999px;
-      font-size: 0.75rem;
-    }
-    .badge-confirmed {
-      background: #e0f2fe;
-      color: #0369a1;
-    }
-    .badge-delivered {
-      background: #dcfce7;
-      color: #166534;
-    }
-    .badge-canceled {
-      background: #fee2e2;
-      color: #b91c1c;
-    }
-    .text-muted {
-      color: #6b7280;
-    }
-    .sum-box {
-      margin: 10px 0;
-      font-size: 0.9rem;
-    }
-  </style>
-</head>
-<body>
-  <header>
-    <h1>Burek – admin narudžbe</h1>
-    <nav>
-      <a href="/admin">Narudžbe</a>
-      <a href="/admin/products">Proizvodi &amp; popusti</a>
-      <a href="/admin/customers">Kupci &amp; kategorije</a>
-    </nav>
-  </header>
-  <div class="container">
-    <div class="filters">
-      <span><strong>Projekt:</strong></span>
-      <select id="project-select">
-        <option value="burek01">burek01</option>
-      </select>
-
-      <span><strong>Status:</strong></span>
-      <select id="status-select">
-        <option value="open">Samo otvorene</option>
-        <option value="all">Sve (potvrđene + isporučene + otkazane)</option>
-      </select>
-
-      <span><strong>Datum:</strong></span>
-      <select id="date-select">
-        <option value="today">Samo danas</option>
-        <option value="all">Svi datumi</option>
-      </select>
-
-      <button id="refresh-btn">Osvježi</button>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Burek – admin narudžbe</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        margin: 0;
+        padding: 0;
+        background: #f4f4f5;
+      }
+      .page {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 16px;
+      }
+      .card {
+        background: white;
+        border-radius: 12px;
+        padding: 16px;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+        margin-bottom: 16px;
+      }
+      h1 {
+        margin: 0 0 8px 0;
+      }
+      .filters {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 10px;
+      }
+      select,
+      button {
+        border-radius: 8px;
+        border: 1px solid #d4d4d8;
+        padding: 6px 10px;
+        font-size: 0.9rem;
+      }
+      button {
+        background: #f97316;
+        color: white;
+        border: none;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: #e4e4e7;
+        color: #111827;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+      }
+      th,
+      td {
+        border-bottom: 1px solid #e4e4e7;
+        padding: 6px 8px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #f4f4f5;
+      }
+      .tag {
+        display: inline-block;
+        padding: 2px 6px;
+        border-radius: 999px;
+        font-size: 0.75rem;
+      }
+      .tag-confirmed {
+        background: #e0f2fe;
+        color: #0369a1;
+      }
+      .tag-delivered {
+        background: #dcfce7;
+        color: #15803d;
+      }
+      .tag-canceled {
+        background: #fee2e2;
+        color: #b91c1c;
+      }
+      .status-td {
+        white-space: nowrap;
+      }
+      .nav {
+        margin-bottom: 10px;
+      }
+      .nav a {
+        margin-right: 10px;
+        text-decoration: none;
+        color: #2563eb;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="card">
+        <div class="nav">
+          <strong>Admin:</strong>
+          <a href="/admin">Narudžbe</a>
+          <a href="/admin/products">Proizvodi & popusti</a>
+          <a href="/admin/customers">Kupci & kategorije</a>
+        </div>
+        <h1>Burek – admin narudžbe</h1>
+        <div class="filters">
+          <label>
+            Status:
+            <select id="filter-status">
+              <option value="open">Samo otvorene (potvrđene)</option>
+              <option value="all">Sve (potvrđene + isporučene + otkazane)</option>
+            </select>
+          </label>
+          <label>
+            Datum:
+            <select id="filter-date">
+              <option value="today">Samo današnje</option>
+              <option value="all">Svi datumi</option>
+            </select>
+          </label>
+          <button id="reload-btn">Osvježi</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Vrijeme</th>
+              <th>Pickup</th>
+              <th>Klijent</th>
+              <th>Telefon</th>
+              <th>Artikli</th>
+              <th>Ukupno</th>
+              <th>Status</th>
+              <th>Akcija</th>
+            </tr>
+          </thead>
+          <tbody id="orders-body"></tbody>
+        </table>
+      </div>
     </div>
 
-    <div class="sum-box">
-      <span id="sum-info" class="text-muted"></span>
-    </div>
+    <script>
+      const tbody = document.getElementById("orders-body");
+      const filterStatus = document.getElementById("filter-status");
+      const filterDate = document.getElementById("filter-date");
+      const reloadBtn = document.getElementById("reload-btn");
 
-    <table id="orders-table">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Vrijeme</th>
-          <th>Klijent</th>
-          <th>Telefon</th>
-          <th>Pickup</th>
-          <th>Artikli</th>
-          <th>Ukupno</th>
-          <th>Status</th>
-          <th>Akcije</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr><td colspan="9" class="text-muted">Učitavanje...</td></tr>
-      </tbody>
-    </table>
-  </div>
+      function fmtDate(iso) {
+        if (!iso) return "";
+        const d = new Date(iso);
+        return (
+          d.toLocaleDateString() +
+          " " +
+          d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        );
+      }
 
-  <script src="/admin.js"></script>
-</body>
+      function renderStatusTag(status) {
+        const s = (status || "").toLowerCase();
+        if (s === "delivered") {
+          return '<span class="tag tag-delivered">Isporučeno</span>';
+        }
+        if (s === "canceled") {
+          return '<span class="tag tag-canceled">Otkazano</span>';
+        }
+        if (s === "confirmed") {
+          return '<span class="tag tag-confirmed">Potvrđeno</span>';
+        }
+        return s;
+      }
+
+      function renderItems(items) {
+        if (!items) return "";
+        const map = {
+          burek_sir: "Sir",
+          burek_meso: "Meso",
+          burek_krumpir: "Krumpir"
+        };
+        const out = [];
+        for (const [k, v] of Object.entries(items)) {
+          const q = Number(v || 0);
+          if (!q) continue;
+          const name = map[k] || k;
+          out.push(`${name}: ${q}`);
+        }
+        return out.join(", ");
+      }
+
+      async function loadOrders() {
+        tbody.innerHTML = '<tr><td colspan="9">Učitavanje...</td></tr>';
+        const status = filterStatus.value;
+        const date = filterDate.value;
+
+        const url = `/api/admin/orders?project=burek01&status=${encodeURIComponent(
+          status
+        )}&date=${encodeURIComponent(date)}`;
+
+        const resp = await fetch(url);
+        const data = await resp.json();
+
+        const orders = data.orders || [];
+        if (orders.length === 0) {
+          tbody.innerHTML =
+            '<tr><td colspan="9">Nema narudžbi za odabrani filter.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = "";
+        for (const o of orders) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${o.id}</td>
+            <td>${fmtDate(o.created_at)}</td>
+            <td>${o.pickup_time || ""}</td>
+            <td>${o.name || ""}</td>
+            <td>${o.phone || ""}</td>
+            <td>${renderItems(o.items)}</td>
+            <td>${o.total != null ? o.total + " €" : ""}</td>
+            <td class="status-td">${renderStatusTag(o.status)}</td>
+            <td>
+              ${
+                o.status === "confirmed"
+                  ? `<button data-id="${o.id}" data-act="delivered">Isporučeno</button>
+                     <button class="secondary" data-id="${o.id}" data-act="cancel">Otkaži</button>`
+                  : ""
+              }
+            </td>
+          `;
+          tbody.appendChild(tr);
+        }
+      }
+
+      tbody.addEventListener("click", async (e) => {
+        const btn = e.target.closest("button");
+        if (!btn) return;
+        const id = btn.getAttribute("data-id");
+        const act = btn.getAttribute("data-act");
+        if (!id || !act) return;
+
+        if (act === "delivered") {
+          await fetch(`/api/admin/orders/${id}/delivered`, { method: "POST" });
+        } else if (act === "cancel") {
+          await fetch(`/api/admin/orders/${id}/cancel`, { method: "POST" });
+        }
+        await loadOrders();
+      });
+
+      reloadBtn.addEventListener("click", loadOrders);
+      filterStatus.addEventListener("change", loadOrders);
+      filterDate.addEventListener("change", loadOrders);
+
+      loadOrders();
+    </script>
+  </body>
 </html>
