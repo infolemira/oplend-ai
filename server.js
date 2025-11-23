@@ -6,6 +6,7 @@
 // - cijena bureka = 5 €
 // - admin dashboard (/admin + /api/admin/orders)
 // - rate limit + logiranje IP + user-agent
+// - Basic Auth za /admin i /api/admin/* (preko env varijabli)
 
 import express from "express";
 import cors from "cors";
@@ -25,6 +26,8 @@ const {
   OPENAI_API_KEY,
   SUPABASE_URL,
   SUPABASE_SERVICE_KEY,
+  ADMIN_USER,
+  ADMIN_PASS,
 } = process.env;
 
 const openai = new OpenAI({
@@ -35,6 +38,40 @@ const supabase =
   SUPABASE_URL && SUPABASE_SERVICE_KEY
     ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
     : null;
+
+// ----------------------------
+//  BASIC AUTH ZA ADMIN
+// ----------------------------
+
+function adminAuth(req, res, next) {
+  // Ako nema postavljenih ADMIN_USER/ADMIN_PASS, ne blokiramo (otvoren admin)
+  if (!ADMIN_USER || !ADMIN_PASS) {
+    return next();
+  }
+
+  const authHeader = req.headers["authorization"] || "";
+  if (!authHeader.startsWith("Basic ")) {
+    res.setHeader("WWW-Authenticate", 'Basic realm="Burek Admin"');
+    return res.status(401).send("Authentication required");
+  }
+
+  const base64 = authHeader.split(" ")[1] || "";
+  let decoded = "";
+  try {
+    decoded = Buffer.from(base64, "base64").toString("utf8");
+  } catch (e) {
+    res.setHeader("WWW-Authenticate", 'Basic realm="Burek Admin"');
+    return res.status(401).send("Invalid auth header");
+  }
+
+  const [user, pass] = decoded.split(":");
+  if (user === ADMIN_USER && pass === ADMIN_PASS) {
+    return next();
+  }
+
+  res.setHeader("WWW-Authenticate", 'Basic realm="Burek Admin"');
+  return res.status(401).send("Invalid credentials");
+}
 
 // ----------------------------
 //  PROJEKTI (više pekara)
@@ -233,7 +270,7 @@ BEISPIEL:
     `,
   },
 
-  // Primjer za drugi projekt (druga pekara) – za kasnije:
+  // PRIMJER za drugi projekt (druga pekara) – za kasnije:
   // burek02: {
   //   id: "burek02",
   //   lang: "multi",
@@ -362,27 +399,7 @@ async function notifyBakeryOnFinalOrder(orderRow) {
       items: orderRow?.items,
     });
 
-    // PRIMJER (pseudo-kod) za e-mail:
-    /*
-    import nodemailer from "nodemailer";
-
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: false,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-
-    await transporter.sendMail({
-      from: '"Burek Bot" <no-reply@tvoja-domena.com>',
-      to: "tvoj-mail@domena.com",
-      subject: "Nova narudžba bureka",
-      text: `Nova narudžba: ...`,
-    });
-    */
+    // OVDJE KASNIJE DODAŠ STVARNI EMAIL/SMS POZIV
   } catch (err) {
     console.error("Greška u notifyBakeryOnFinalOrder:", err);
   }
@@ -696,9 +713,9 @@ app.get("/widget.js", (req, res) => {
     "<div id='opl-desc' style='margin-top:6px;color:#555;font-size:14px'></div>" +
     "</div>" +
     "<div id='opl-chat' style='height:60vh;overflow:auto;padding:12px;background:#fafafa'></div>" +
-    "<div style='display:flex;gap:8px;padding:12px;border-top:1px solid #eee;background:white'>" +
+    "<div style='display:flex;gap:8px;padding:12px;border-top:1px solid:#eee;background:white'>" +
     "<textarea id='opl-in' placeholder='Poruka...' style='flex:1;min-height:44px;border:1px solid #ddd;border-radius:8px;padding:10px'></textarea>" +
-    "<button id='opl-send' type='button' style='padding:10px 16px;border:1px solid #222;background:#222;color:white;border-radius:8px;cursor:pointer'>Pošalji</button>" +
+    "<button id='opl-send' type='button' style='padding:10px 16px;border:1px solid:#222;background:#222;color:white;border-radius:8px;cursor:pointer'>Pošalji</button>" +
     "</div>";
 
   script.parentNode.insertBefore(box, script);
@@ -817,7 +834,7 @@ app.get("/demo", (req, res) => {
 // ----------------------------
 
 // GET /api/admin/orders?status=open|all&date=today|all&project=burek01
-app.get("/api/admin/orders", async (req, res) => {
+app.get("/api/admin/orders", adminAuth, async (req, res) => {
   if (!supabase) {
     return res.status(500).json({ error: "Supabase nije konfiguriran." });
   }
@@ -868,7 +885,7 @@ app.get("/api/admin/orders", async (req, res) => {
 });
 
 // POST /api/admin/orders/:id/delivered
-app.post("/api/admin/orders/:id/delivered", async (req, res) => {
+app.post("/api/admin/orders/:id/delivered", adminAuth, async (req, res) => {
   if (!supabase) {
     return res.status(500).json({ error: "Supabase nije konfiguriran." });
   }
@@ -898,8 +915,7 @@ app.post("/api/admin/orders/:id/delivered", async (req, res) => {
 //  ADMIN DASHBOARD PAGE (/admin)
 // ----------------------------
 
-app.get("/admin", (req, res) => {
-  // ⚠️ Trenutno bez autentikacije – kasnije dodati zaštitu (IP whitelist, basic auth, itd.)
+app.get("/admin", adminAuth, (req, res) => {
   res.send(`
 <!DOCTYPE html>
 <html lang="hr">
@@ -977,6 +993,10 @@ app.get("/admin", (req, res) => {
         background: #ef4444;
         color: white;
       }
+      .badge-draft {
+        background: #e5e7eb;
+        color: #111827;
+      }
       .nowrap {
         white-space: nowrap;
       }
@@ -992,6 +1012,7 @@ app.get("/admin", (req, res) => {
       <label>Projekt:
         <select id="project-select">
           <option value="burek01">burek01</option>
+          <!-- Za novu pekaru: dodaj ovdje <option value="burek02">burek02</option> -->
         </select>
       </label>
       <label>Status:
@@ -1086,7 +1107,7 @@ app.get("/admin", (req, res) => {
             } else if (o.is_finalized) {
               statusHtml = "<span class='badge badge-open'>Potvrđeno</span>";
             } else {
-              statusHtml = "<span class='badge'>Nacrt / u tijeku</span>";
+              statusHtml = "<span class='badge badge-draft'>Nacrt / u tijeku</span>";
             }
 
             const btnDisabled = o.is_delivered || o.is_cancelled || !o.is_finalized;
