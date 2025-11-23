@@ -1,13 +1,12 @@
-// server.js – Oplend AI (burek) – s products + popusti + kategorije
+// server.js – Oplend AI (burek) – s products + popusti + customers admin
 // - Chat narudžbe (HR/DE/EN, META, Supabase, password logika)
 // - Lozinke i kategorije u customers
 // - Proizvodi i popusti u products
-// - Admin orders: /admin + /api/admin/orders
-// - Admin products: /admin/products + /api/admin/products*
-// - Admin customers: /admin/customers + /api/admin/customers*
+// - Admin narudžbe: /admin + /api/admin/orders
+// - Admin proizvodi: /admin/products + /api/admin/products*
+// - Admin kupci: /admin/customers + /api/admin/customers*
 // - Logiranje client_ip + user_agent
 // - Rate limit na /api/chat
-// - Kod modify_last: stara narudžba se otkazuje, nova ima ispravne artikle i total
 
 import express from "express";
 import cors from "cors";
@@ -46,15 +45,14 @@ const supabase =
     : null;
 
 // ----------------------------
-//  PROJEKTI (više pekara)
+//  PROJEKT
 // ----------------------------
 
 const PROJECTS = {
   burek01: {
     lang: "multi",
     title: "Burek – Online narudžba",
-    // fallback cijene ako nema products u bazi (samo sigurnosna mreža)
-    pricing: { kaese: 5, fleisch: 5, kartoffeln: 5 },
+    pricing: { kaese: 5, fleisch: 5, kartoffeln: 5 }, // fallback ako nema products
     systemPrompt: `
 Du bist ein Bestell-Assistent für eine Bäckerei. Du bearbeitest ausschließlich Bestellungen für:
 1) Burek mit Käse
@@ -77,13 +75,6 @@ IZBJEGAVAJ PONAVLJANJE ISTIH PITANJA
 - Ako je podatak već JASNO naveden u ovom chatu:
   - NE pitaj ponovo isto pitanje.
   - Umjesto toga, koristi već postojeći podatak.
-- Primjeri:
-  - Ako je korisnik već napisao broj telefona: ne pitaj opet "koji je vaš broj telefona?".
-  - Ako je korisnik već napisao ime: ne pitaj ponovno "kako se zovete?", osim ako kaže da je prethodni podatak kriv.
-  - Ako je korisnik već jednom unio password u ovom chatu i backend ga je prihvatio
-    (vidićeš po tome što je narudžba potvrđena), NE traži ponovo password za istu narudžbu.
-- Kada korisnik ispravlja narudžbu u NOVOM chatu:
-  - Jednom tražiš broj telefona i password, nakon toga ih VIŠE NE PONAVLJAŠ u tom razgovoru.
 
 ---------------------------------------------
 STANDARDNI FLOW NOVE NARUDŽBE
@@ -99,146 +90,69 @@ STANDARDNI FLOW NOVE NARUDŽBE
 → NE PITAJ za vrijeme, ime ili telefon DOK KLIJENT NE POTVRDI da je to sve.
 
 2) KADA KLIJENT POTVRDI DA JE TO SVE
-Prepoznaj odgovore tipa:
-- DE: "Ja, das ist alles", "das wars", "ja, das war’s", "ja, das ist alles, danke"
-- BHS: "da, to je sve", "to je sve", "je, to je sve", "to je to"
-- EN: "yes, that’s all", "that’s all", "yes, that’s it"
-
-TADA PITAJ:
-  - DE: "Wann möchten Sie Ihre Bestellung abholen?"
-  - EN: "When would you like to pick up your order?"
-  - BHS: "Kada želite doći po narudžbu?" / "U koliko sati dolazite po narudžbu?"
-
-3) KADA KLIJENT NAPIŠE VRIJEME PREUZIMANJA
-- Potvrdi vrijeme (npr: "Abholung um 15:30." / "Preuzimanje u 15:30.").
-- Zatim PITAJ:
-  - DE: "Wie ist Ihr Name und Ihre Telefonnummer?"
-  - EN: "What is your name and phone number?"
-  - BHS: "Kako se zovete i koji je vaš broj telefona?"
+→ Pitaj za vrijeme preuzimanja.
+3) KADA NAPIŠE VRIJEME
+→ Pitaj za ime i broj telefona.
 
 ---------------------------------------------
-PASSWORD LOGIKA (BROJ TELEFONA = JEDAN KLIJENT)
+PASSWORD LOGIKA
 ---------------------------------------------
 
-- Identitet klijenta je kombinacija: BROJ TELEFONA + PASSWORD.
-- Broj telefona može pripadati SAMO jednom passwordu (jednom klijentu).
-- Ako je broj telefona već registriran (ima password u sistemu),
-  ne smiješ postavljati novi password za taj broj – samo traži postojeći.
+- Identitet klijenta: BROJ TELEFONA + PASSWORD.
+- Broj telefona može imati samo JEDAN password.
 
-NOVI KLIJENT (broj telefona NEMA password u bazi):
-- Nakon što dobiješ ime + broj telefona:
-  - Objasni da treba postaviti password za buduće narudžbe.
-  - Pitaj: "Molim vas unesite password koji želite koristiti ubuduće."
-  - Kad je korisnik unese → u META stavi: passwordAction = "set", password = "..."
-  - NE traži password ponovo na kraju iste narudžbe.
+NOVI KLIJENT:
+- Nakon imena + telefona:
+  - objasni da postavlja password za ubuduće
+  - pitaš: "Molim vas unesite password koji želite koristiti ubuduće."
+  - META: passwordAction="set", password="..."
 
-POSTOJEĆI KLIJENT (broj telefona VEĆ IMA password u bazi):
+POSTOJEĆI KLIJENT:
 - NE traži novi password.
-- Vodi normalni flow (vrste + količine → je li to sve → vrijeme → ime + telefon).
-- PRIJE ZAVRŠNE POTVRDE narudžbe:
-  - Zamoli da POTVRDI narudžbu svojim POSTOJEĆIM passwordom.
-  - npr: "Molim potvrdite svoju narudžbu unošenjem vašeg passworda."
-  - Kada ga unese → META: passwordAction = "confirm", password = "..."
+- PRIJE završne potvrde narudžbe:
+  - zamoli da potvrdi narudžbu unošenjem postojećeg passworda
+  - META: passwordAction="confirm", password="..."
 
 ZABORAVLJEN PASSWORD:
-- Ako korisnik kaže da je zaboravio password:
-  - NE mijenjaj password.
-  - Ljubazno objasni da novi password dobija tek nakon ručne provjere u pekari (telefon / lično).
-  - U META: newPasswordRequested = true.
+- Objasni da novi password dobiva tek nakon provjere u pekari.
+- META: newPasswordRequested=true.
 
-⚠️ VEOMA VAŽNO:
-- TI KAO ASISTENT NE ZNAŠ da li je password ispravan ili ne.
-- NIKADA ne smiješ reći:
-  - "password nije ispravan", "pogrešna lozinka", "lozinka ne odgovara",
-  - niti odbiti narudžbu uz obrazloženje da je password netačan.
-- Tvoja jedina uloga je:
-  - tražiti password kad je potrebno
-  - upisati ga u META polje "password" i "passwordAction"
-  - backend sistem će provjeriti ispravnost i eventualno korisniku javiti da lozinka nije tačna.
+⚠️ TI NE ZNAŠ JE LI PASSWORD TOČAN
+- Nikad ne govori "pogrešan password".
+- Samo šalješ password i passwordAction u META.
+- Backend provjerava.
 
 ---------------------------------------------
-ZAVRŠNA POTVRDA NARUDŽBE
+OTKAZIVANJE / IZMJENA
 ---------------------------------------------
 
-- Kada su poznati:
-  - vrste + količine bureka
-  - okvirna ukupna cijena (prema cjenovniku)
-  - vrijeme preuzimanja
-  - ime i broj telefona
-  - (za postojećeg klijenta) password je unijet i sistem ga je prihvatio
-
-→ napravi završnu potvrdu i u META stavi:
-  - isFinalOrder = true
-  - closeChat = true
-
-U odgovoru JASNO reci da je:
-- narudžba potvrđena
-- plaćanje pri preuzimanju
-- ovaj chat sada je ZATVOREN za ovu narudžbu
-- za nova pitanja ili izmjene treba otvoriti NOVI chat.
+- Novi chat: korisnik želi otkazati ili ispraviti prethodnu narudžbu.
+- Tražiš telefon (+ password ako postoji).
+- Kad potvrdi:
+  - Otkazivanje:
+    - META: orderAction="cancel_last", isFinalOrder=true, closeChat=true
+  - Izmjena:
+    - prikupi novu narudžbu,
+    - META: orderAction="modify_last", isFinalOrder=true, closeChat=true
 
 ---------------------------------------------
-OTKAZIVANJE / IZMJENA PRETHODNE NARUDŽBE
+TECHNICAL META
 ---------------------------------------------
 
-Ako korisnik u NOVOM chatu napiše da želi:
-- otkazati prethodnu narudžbu
-- ili ispraviti / promijeniti prethodnu narudžbu
+Na KRAJU SVAKOG odgovora:
 
-TADA:
-1) Traži broj telefona (ako nije već napisan u ovom chatu).
-2) Provjeri (interno, preko sistema) da li je za taj broj već postojao password.
-3) Ako postoji password → traži da unese password za potvrdu identiteta.
-   - Kada ga korisnik unese, OBAVEZNO u META upiši:
-     - passwordAction = "confirm"
-     - password = uneseni tekst.
+##META {...}
 
-OTKAZIVANJE:
-- Ako želi potpuno anulirati zadnju potvrđenu narudžbu:
-  - Objasni da ćeš otkazati NJEGOVU POSLJEDNJU potvrđenu narudžbu koja još nije isporučena.
-  - U META stavi:
-    - orderAction = "cancel_last"
-    - isFinalOrder = true
-    - closeChat = true
-
-IZMJENA:
-- Ako želi promijeniti zadnju potvrđenu narudžbu:
-  - Jasno pitaj novu željenu kombinaciju (vrste + količine, eventualno novo vrijeme).
-  - Kada nova kombinacija bude jasna i password je unijet:
-    - U META:
-      - orderAction = "modify_last"
-      - isFinalOrder = true
-      - (closeChat = true nakon završne potvrde)
-
-VAŽNO:
-- Otkazivanje ili izmjena vrijedi samo dok narudžba NIJE označena kao isporučena (interno, preko sistema).
-- Ako sistem javi da je narudžba već isporučena, TI samo objasni da izmjena/otkazivanje nije moguće.
-
----------------------------------------------
-TECHNICAL METADATA (VRLO VAŽNO)
----------------------------------------------
-
-Am ENDE JEDER ANTWORT musst du EINE zusätzliche Zeile ausgeben,
-die GENAU SO beginnt:
-
-##META {JSON}
-
-JSON Objekt mit:
-  - "phone": string oder null
-  - "name": string oder null
-  - "pickupTime": string oder null
-  - "passwordAction": "none" | "set" | "confirm"
-  - "password": string oder null
-  - "isFinalOrder": true/false
-  - "closeChat": true/false
-  - "newPasswordRequested": true/false
-  - "orderAction": "none" | "cancel_last" | "modify_last"
-
-BEISPIEL:
-##META {"phone":"+491761234567","name":"Marko","pickupTime":"15:30","passwordAction":"confirm","password":"mojaSifra123","isFinalOrder":true,"closeChat":true,"newPasswordRequested":false,"orderAction":"cancel_last"}
-
-- U ovoj liniji NE smije biti ništa osim "##META " i JSON objekta.
-- Ovu liniju NE objašnjavaš korisniku. Ona je samo za sistem.
+JSON:
+  "phone": string|null
+  "name": string|null
+  "pickupTime": string|null
+  "passwordAction": "none" | "set" | "confirm"
+  "password": string|null
+  "isFinalOrder": true/false
+  "closeChat": true/false
+  "newPasswordRequested": true/false
+  "orderAction": "none" | "cancel_last" | "modify_last"
     `,
   },
 };
@@ -249,7 +163,6 @@ BEISPIEL:
 
 function parseQuantities(text) {
   const t = (text || "").toLowerCase();
-
   const get = (regex) => {
     const m = t.match(regex);
     return m ? Number(m[1]) : 0;
@@ -277,50 +190,6 @@ function detectPhone(text) {
   return m[1].replace(/[^\d+]/g, "");
 }
 
-function statusLabel(row, lang = "hr") {
-  if (row.is_cancelled) {
-    if (lang === "de") return "Storniert";
-    if (lang === "en") return "Cancelled";
-    return "Otkazano";
-  }
-  if (row.is_delivered) {
-    if (lang === "de") return "Ausgeliefert";
-    if (lang === "en") return "Delivered";
-    return "Isporučeno";
-  }
-  if (row.is_finalized) {
-    if (lang === "de") return "Bestätigt";
-    if (lang === "en") return "Confirmed";
-    return "Potvrđeno";
-  }
-  if (lang === "de") return "Entwurf";
-  if (lang === "en") return "Draft";
-  return "Nacrt";
-}
-
-function itemsToText(items, lang = "hr") {
-  if (!items) return "-";
-  const k = items.kaese || 0;
-  const f = items.fleisch || 0;
-  const kart = items.kartoffeln || 0;
-  const parts = [];
-  if (k)
-    parts.push(
-      `${k}x ${lang === "de" ? "Käse" : lang === "en" ? "cheese" : "sir"}`
-    );
-  if (f)
-    parts.push(
-      `${f}x ${lang === "de" ? "Fleisch" : lang === "en" ? "meat" : "meso"}`
-    );
-  if (kart)
-    parts.push(
-      `${kart}x ${
-        lang === "de" ? "Kartoffeln" : lang === "en" ? "potato" : "krumpir"
-      }`
-    );
-  return parts.length ? parts.join(", ") : "-";
-}
-
 function getClientIp(req) {
   return (
     req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
@@ -329,8 +198,7 @@ function getClientIp(req) {
   );
 }
 
-// ---- customers helperi ----
-
+// customers helperi
 async function getCustomerByPhone(phone) {
   if (!supabase || !phone) return null;
   try {
@@ -371,8 +239,7 @@ async function upsertCustomer(phone, passwordPlain, name) {
   }
 }
 
-// ---- products helperi + popust logika ----
-
+// products helperi + popust logika
 async function getProductsForProject(projectId) {
   if (!supabase) return [];
   try {
@@ -428,7 +295,6 @@ function computeUnitPrice(product, customerCategories = []) {
   return price;
 }
 
-// system poruka AI-ju s cijenama za ovog kupca
 function buildPricingInstruction(products, lang, customerCategories) {
   if (!products || products.length === 0) return "";
 
@@ -545,7 +411,7 @@ app.get("/api/projects/:id/config", (req, res) => {
     title: p.title,
     description,
     welcome,
-    pricing: p.pricing, // fallback, backend ionako koristi products
+    pricing: p.pricing, // fallback
   });
 });
 
@@ -583,7 +449,6 @@ app.post("/api/chat", async (req, res) => {
         ? "Odgovaraj isključivo na bosanskom/hrvatskom/srpskom jeziku."
         : "Antwort in der Sprache der letzten Benutzer-Nachricht.";
 
-    // --- Detekcija telefona + customer (password + kategorije) ---
     const allUserTextForPhone =
       safeHistory
         .filter((m) => m.role === "user")
@@ -603,14 +468,12 @@ app.post("/api/chat", async (req, res) => {
         : [];
     }
 
-    // --- Products za ovaj projekt ---
     const products = await getProductsForProject(projectId);
     const productsByCode = {};
     for (const prod of products) {
       productsByCode[prod.code] = prod;
     }
 
-    // internal status za model
     let internalUserStatusMessage = null;
     if (phoneCandidate) {
       internalUserStatusMessage = {
@@ -620,7 +483,7 @@ app.post("/api/chat", async (req, res) => {
           phoneCandidate +
           ", hasPassword=" +
           (existingPasswordHash ? "true" : "false") +
-          ". Verwende diese Info NUR intern, um zu entscheiden, ob der Kunde ein NEUES Passwort setzen soll (falls hasPassword=false) oder sein bestehendes Passwort NUR EINMAL zur Bestätigung der Bestellung eingeben soll (falls hasPassword=true). Erkläre diese interne Info dem Kunden NICHT.",
+          ". Verwende diese Info NUR intern...",
       };
     }
 
@@ -657,7 +520,7 @@ app.post("/api/chat", async (req, res) => {
 
     let reply = ai.choices?.[0]?.message?.content || "OK.";
 
-    // --- META PARSING ---
+    // META
     let meta = null;
     const metaMatch = reply.match(/##META\s+(\{[\s\S]*\})\s*$/);
     if (metaMatch) {
@@ -670,7 +533,7 @@ app.post("/api/chat", async (req, res) => {
       reply = reply.replace(/##META[\s\S]*$/, "").trim();
     }
 
-    // --- Izračun cijene na backendu (uz popuste) ---
+    // KOLIČINE + CIJENA (uz popuste)
     const allUserTextForQty =
       safeHistory
         .filter((m) => m.role === "user")
@@ -678,7 +541,6 @@ app.post("/api/chat", async (req, res) => {
         .join("\n") + "\n" + message;
 
     const qty = parseQuantities(allUserTextForQty);
-
     const fallbackPricing = p.pricing || {};
     const codes = ["kaese", "fleisch", "kartoffeln"];
 
@@ -686,12 +548,11 @@ app.post("/api/chat", async (req, res) => {
     let totalPieces = 0;
     const partsLabel = [];
     const discountNotes = [];
-
     for (const code of codes) {
       const q = qty[code] || 0;
       if (!q) continue;
-
       const product = productsByCode[code];
+
       let base = null;
       let unitPrice = null;
       let hasDiscount = false;
@@ -711,13 +572,9 @@ app.post("/api/chat", async (req, res) => {
       total += unitPrice * q;
       totalPieces += q;
 
-      if (code === "kaese") {
-        partsLabel.push(`${q}x Käse`);
-      } else if (code === "fleisch") {
-        partsLabel.push(`${q}x Fleisch`);
-      } else if (code === "kartoffeln") {
-        partsLabel.push(`${q}x Kartoffeln`);
-      }
+      if (code === "kaese") partsLabel.push(`${q}x Käse`);
+      if (code === "fleisch") partsLabel.push(`${q}x Fleisch`);
+      if (code === "kartoffeln") partsLabel.push(`${q}x Kartoffeln`);
 
       if (hasDiscount && discountName) {
         discountNotes.push({
@@ -735,20 +592,20 @@ app.post("/api/chat", async (req, res) => {
       let priceLine = "";
       const partsText = partsLabel.join(", ");
       const totalText = total.toFixed(2) + " €";
-
       const anyDiscount = discountNotes.length > 0;
 
       if (lang === "bhs") {
         priceLine = `Ukupna cijena (${partsText}): ${totalText}.`;
         if (anyDiscount) {
           const details = discountNotes
-            .map((d) => {
-              return `${d.name}: ${d.quantity}x po ${d.unitPrice.toFixed(
-                2
-              )} € (popust "${d.discountName}", redovna cijena ${d.base.toFixed(
-                2
-              )} €)`;
-            })
+            .map(
+              (d) =>
+                `${d.name}: ${d.quantity}x po ${d.unitPrice.toFixed(
+                  2
+                )} € (popust "${d.discountName}", redovna cijena ${d.base.toFixed(
+                  2
+                )} €)`
+            )
             .join("; ");
           priceLine += `\nPrimijenjeni popusti: ${details}.`;
         }
@@ -756,13 +613,14 @@ app.post("/api/chat", async (req, res) => {
         priceLine = `Total price (${partsText}): ${totalText}.`;
         if (anyDiscount) {
           const details = discountNotes
-            .map((d) => {
-              return `${d.name}: ${d.quantity}x at ${d.unitPrice.toFixed(
-                2
-              )} € (discount "${d.discountName}", regular price ${d.base.toFixed(
-                2
-              )} €)`;
-            })
+            .map(
+              (d) =>
+                `${d.name}: ${d.quantity}x at ${d.unitPrice.toFixed(
+                  2
+                )} € (discount "${d.discountName}", regular price ${d.base.toFixed(
+                  2
+                )} €)`
+            )
             .join("; ");
           priceLine += `\nApplied discounts: ${details}.`;
         }
@@ -770,13 +628,14 @@ app.post("/api/chat", async (req, res) => {
         priceLine = `Gesamtpreis (${partsText}): ${totalText}.`;
         if (anyDiscount) {
           const details = discountNotes
-            .map((d) => {
-              return `${d.name}: ${d.quantity}x für ${d.unitPrice.toFixed(
-                2
-              )} € (Rabatt "${d.discountName}", Standardpreis ${d.base.toFixed(
-                2
-              )} €)`;
-            })
+            .map(
+              (d) =>
+                `${d.name}: ${d.quantity}x für ${d.unitPrice.toFixed(
+                  2
+                )} € (Rabatt "${d.discountName}", Standardpreis ${d.base.toFixed(
+                  2
+                )} €)`
+            )
             .join("; ");
           priceLine += `\nAngewendete Rabatte: ${details}.`;
         }
@@ -785,7 +644,7 @@ app.post("/api/chat", async (req, res) => {
       reply += `\n\n${priceLine}`;
     }
 
-    // --- PASSWORD / ORDER META NA BACKENDU ---
+    // PASSWORD / ORDER META
     let phoneToStore = (meta && meta.phone) || phoneCandidate || null;
     let nameToStore = meta && meta.name ? meta.name : null;
     let pickupTimeToStore =
@@ -799,7 +658,7 @@ app.post("/api/chat", async (req, res) => {
     const orderAction = (meta && meta.orderAction) || "none";
     const passwordAction = (meta && meta.passwordAction) || "none";
 
-    // 1) SET new password
+    // NEW PASSWORD
     if (
       passwordAction === "set" &&
       meta &&
@@ -812,7 +671,7 @@ app.post("/api/chat", async (req, res) => {
       existingPasswordHash = refreshed?.password_hash || null;
     }
 
-    // 2) CONFIRM existing password
+    // CONFIRM PASSWORD
     if (
       passwordAction === "confirm" &&
       meta &&
@@ -846,7 +705,7 @@ app.post("/api/chat", async (req, res) => {
       }
     }
 
-    // 3) ORDER-AKTIONEN (cancel / modify) – stara zadnja finalna se otkazuje
+    // ORDER ACTION: cancel / modify – otkazuje zadnju finalnu
     if (
       supabase &&
       phoneToStore &&
@@ -882,67 +741,32 @@ app.post("/api/chat", async (req, res) => {
       }
     }
 
-    // --- SUPABASE LOGGING (svaki chat korak) ---
-    let insertedOrderId = null;
-
+    // UPIS U orders
     if (supabase) {
       try {
-        const { data, error } = await supabase
-          .from("orders")
-          .insert({
-            project_id: projectId,
-            user_message: message,
-            ai_reply: reply,
-            items: {
-              kaese: qty.kaese,
-              fleisch: qty.fleisch,
-              kartoffeln: qty.kartoffeln,
-            },
-            total: total || null,
-            user_phone: phoneToStore,
-            user_name: nameToStore,
-            pickup_time: pickupTimeToStore,
-            is_finalized: isFinalized,
-            is_cancelled: orderAction === "cancel_last" ? true : false,
-            is_delivered: false,
-            order_action: orderAction,
-            client_ip,
-            user_agent,
-          })
-          .select("id")
-          .single();
-
-        if (error) {
-          console.error("Supabase insert error:", error);
-        } else {
-          insertedOrderId = data?.id || null;
-        }
+        await supabase.from("orders").insert({
+          project_id: projectId,
+          user_message: message,
+          ai_reply: reply,
+          items: {
+            kaese: qty.kaese,
+            fleisch: qty.fleisch,
+            kartoffeln: qty.kartoffeln,
+          },
+          total: total || null,
+          user_phone: phoneToStore,
+          user_name: nameToStore,
+          pickup_time: pickupTimeToStore,
+          is_finalized: isFinalized,
+          is_cancelled: orderAction === "cancel_last" ? true : false,
+          is_delivered: false,
+          order_action: orderAction,
+          client_ip,
+          user_agent,
+        });
       } catch (dbErr) {
         console.error("Supabase insert error:", dbErr);
       }
-    }
-
-    // --- NOTIFY BAKERY NA NOVU FINALNU NARUDŽBU ---
-    if (
-      isFinalized &&
-      !(
-        orderAction === "cancel_last" ||
-        orderAction === "modify_last"
-      )
-    ) {
-      notifyBakeryOnFinalOrder({
-        projectId,
-        phone: phoneToStore,
-        name: nameToStore,
-        pickupTime: pickupTimeToStore,
-        items: {
-          kaese: qty.kaese,
-          fleisch: qty.fleisch,
-          kartoffeln: qty.kartoffeln,
-        },
-        total: total || null,
-        orderId: insertedOrderId,
-      });
     }
 
     return res.json({ reply, total: total || null });
@@ -953,7 +777,7 @@ app.post("/api/chat", async (req, res) => {
 });
 
 // ----------------------------
-//  widget.js (frontend za iframe)
+//  widget.js – chat za iframe
 // ----------------------------
 
 app.get("/widget.js", (req, res) => {
@@ -979,7 +803,7 @@ app.get("/widget.js", (req, res) => {
     "<div id='opl-chat' style='height:60vh;overflow:auto;padding:12px;background:#fafafa'></div>" +
     "<div style='display:flex;gap:8px;padding:12px;border-top:1px solid:#eee;background:white'>" +
     "<textarea id='opl-in' placeholder='Poruka...' style='flex:1;min-height:44px;border:1px solid #ddd;border-radius:8px;padding:10px'></textarea>" +
-    "<button id='opl-send' type='button' style='padding:10px 16px;border:1px solid #222;background:#222;color:white;border-radius:8px;cursor:pointer'>Pošalji</button>" +
+    "<button id='opl-send' type='button' style='padding:10px 16px;border:1px solid:#222;background:#222;color:white;border-radius:8px;cursor:pointer'>Pošalji</button>" +
     "</div>";
 
   script.parentNode.insertBefore(box, script);
@@ -1085,7 +909,7 @@ app.get("/demo", (req, res) => {
 });
 
 // ----------------------------
-//  ADMIN – HTML EKRANI
+//  ADMIN HTML EKRANI
 // ----------------------------
 
 app.get("/admin", adminAuthMiddleware, (req, res) => {
@@ -1115,9 +939,9 @@ app.get("/api/admin/orders", adminAuthMiddleware, async (req, res) => {
     }
 
     const {
-      projectId = "burek01",
+      project = "burek01",
+      status = "all",
       date = "all",
-      lang = "hr",
     } = req.query;
 
     let query = supabase
@@ -1138,11 +962,7 @@ app.get("/api/admin/orders", adminAuthMiddleware, async (req, res) => {
         order_action
       `
       )
-      .eq("project_id", projectId);
-
-    query = query.or(
-      "is_finalized.eq.true,is_cancelled.eq.true,is_delivered.eq.true"
-    );
+      .eq("project_id", project);
 
     if (date === "today") {
       const today = new Date();
@@ -1158,7 +978,7 @@ app.get("/api/admin/orders", adminAuthMiddleware, async (req, res) => {
         .lt("created_at", end.toISOString());
     }
 
-    const { data, error } = await query.order("created_at", {
+    let { data, error } = await query.order("created_at", {
       ascending: false,
     });
 
@@ -1167,31 +987,29 @@ app.get("/api/admin/orders", adminAuthMiddleware, async (req, res) => {
       return res.status(500).json({ error: "DB error" });
     }
 
-    const mapped = data.map((row) => ({
-      id: row.id,
-      project_id: row.project_id,
-      created_at: row.created_at,
-      user_name: row.user_name,
-      user_phone: row.user_phone,
-      pickup_time: row.pickup_time,
-      items: row.items,
-      items_text: itemsToText(row.items, lang),
-      total: row.total,
-      is_finalized: row.is_finalized,
-      is_cancelled: row.is_cancelled,
-      is_delivered: row.is_delivered,
-      order_action: row.order_action,
-      status_label: statusLabel(row, lang),
-    }));
+    // izbacimo nacrte (drafts)
+    data = (data || []).filter(
+      (o) => o.is_finalized || o.is_cancelled || o.is_delivered
+    );
 
-    res.json({ orders: mapped });
+    if (status === "open") {
+      data = data.filter(
+        (o) =>
+          o.is_finalized && !o.is_cancelled && !o.is_delivered
+      );
+    } else if (status === "delivered") {
+      data = data.filter((o) => o.is_delivered);
+    } else if (status === "cancelled") {
+      data = data.filter((o) => o.is_cancelled);
+    }
+
+    res.json({ orders: data || [] });
   } catch (err) {
     console.error("Admin orders error:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-// označi isporučeno
 app.post(
   "/api/admin/orders/:id/delivered",
   adminAuthMiddleware,
@@ -1346,58 +1164,7 @@ app.post(
       res.status(500).json({ error: "Server error" });
     }
   }
-);
-
-app.post(
-  "/api/admin/products",
-  adminAuthMiddleware,
-  async (req, res) => {
-    try {
-      if (!supabase) {
-        return res.status(500).json({ error: "Supabase not configured" });
-      }
-
-      const {
-        project_id = "burek01",
-        name,
-        code,
-        base_price,
-      } = req.body;
-
-      if (!name || !code || base_price == null) {
-        return res
-          .status(400)
-          .json({ error: "name, code i base_price su obavezni" });
-      }
-
-      const insert = {
-        project_id,
-        name,
-        code,
-        base_price: Number(base_price),
-        is_active: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-
-      const { data, error } = await supabase
-        .from("products")
-        .insert(insert)
-        .select("id")
-        .single();
-
-      if (error) {
-        console.error("Supabase insert product error:", error);
-        return res.status(500).json({ error: "DB error" });
-      }
-
-      res.json({ ok: true, id: data.id });
-    } catch (err) {
-      console.error("Admin create product error:", err);
-      res.status(500).json({ error: "Server error" });
-    }
-  }
-);
+});
 
 // ----------------------------
 //  ADMIN – CUSTOMERS API
@@ -1469,14 +1236,6 @@ app.post(
     }
   }
 );
-
-// ----------------------------
-//  NOTIFY BAKERY (stub)
-// ----------------------------
-
-function notifyBakeryOnFinalOrder(order) {
-  console.log("NEW FINAL ORDER:", order);
-}
 
 // ----------------------------
 //  ROOT
