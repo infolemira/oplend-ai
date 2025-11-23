@@ -7,6 +7,10 @@
 // - admin dashboard (/admin + /api/admin/orders)
 // - rate limit + logiranje IP + user-agent
 // - Basic Auth za /admin i /api/admin/* (preko env varijabli)
+// - admin tablica: 
+//    status=open -> potvrđene, neisporučene, neotkazane
+//    status=all  -> sve potvrđene (i isporučene i otkazane), bez nacrta
+// - admin /admin na HR / DE / EN preko ?lang= parametra
 
 import express from "express";
 import cors from "cors";
@@ -386,8 +390,6 @@ app.get("/api/projects/:id/config", (req, res) => {
 //  NOTIFICATION HOOK (za pekaru)
 // ----------------------------
 
-// Trenutno samo ispis u konzolu.
-// Kasnije ovdje možeš dodati pravi e-mail / SMS (npr. preko nodemailer / Twilio).
 async function notifyBakeryOnFinalOrder(orderRow) {
   try {
     console.log("NOVA POTVRĐENA NARUDŽBA:", {
@@ -398,7 +400,6 @@ async function notifyBakeryOnFinalOrder(orderRow) {
       total: orderRow?.total,
       items: orderRow?.items,
     });
-
     // OVDJE KASNIJE DODAŠ STVARNI EMAIL/SMS POZIV
   } catch (err) {
     console.error("Greška u notifyBakeryOnFinalOrder:", err);
@@ -420,7 +421,7 @@ app.post("/api/chat", async (req, res) => {
       projectId = "burek01",
       message = "",
       history = [],
-      lang: forcedLang, // opcionalno, ako ikad poželiš slati iz frontenda
+      lang: forcedLang,
     } = req.body;
 
     const p = PROJECTS[projectId] || PROJECTS["burek01"];
@@ -714,7 +715,7 @@ app.get("/widget.js", (req, res) => {
     "</div>" +
     "<div id='opl-chat' style='height:60vh;overflow:auto;padding:12px;background:#fafafa'></div>" +
     "<div style='display:flex;gap:8px;padding:12px;border-top:1px solid:#eee;background:white'>" +
-    "<textarea id='opl-in' placeholder='Poruka...' style='flex:1;min-height:44px;border:1px solid #ddd;border-radius:8px;padding:10px'></textarea>" +
+    "<textarea id='opl-in' placeholder='Poruka...' style='flex:1;min-height:44px;border:1px solid:#ddd;border-radius:8px;padding:10px'></textarea>" +
     "<button id='opl-send' type='button' style='padding:10px 16px;border:1px solid:#222;background:#222;color:white;border-radius:8px;cursor:pointer'>Pošalji</button>" +
     "</div>";
 
@@ -834,6 +835,8 @@ app.get("/demo", (req, res) => {
 // ----------------------------
 
 // GET /api/admin/orders?status=open|all&date=today|all&project=burek01
+// status=open -> potvrđene, neisporučene, neotkazane
+// status=all  -> sve potvrđene (i isporučene i otkazane), bez nacrta
 app.get("/api/admin/orders", adminAuth, async (req, res) => {
   if (!supabase) {
     return res.status(500).json({ error: "Supabase nije konfiguriran." });
@@ -854,10 +857,14 @@ app.get("/api/admin/orders", adminAuth, async (req, res) => {
       .limit(200);
 
     if (status === "open") {
+      // samo ono što još treba obraditi
       query = query
         .eq("is_finalized", true)
         .eq("is_cancelled", false)
         .eq("is_delivered", false);
+    } else {
+      // "all" – sve potvrđene (i isporučene i otkazane), bez nacrta
+      query = query.eq("is_finalized", true);
     }
 
     if (date === "today") {
@@ -912,16 +919,113 @@ app.post("/api/admin/orders/:id/delivered", adminAuth, async (req, res) => {
 });
 
 // ----------------------------
-//  ADMIN DASHBOARD PAGE (/admin)
+//  ADMIN DASHBOARD PAGE (/admin) – više jezika
 // ----------------------------
 
 app.get("/admin", adminAuth, (req, res) => {
+  const lang = (req.query.lang || "hr").toLowerCase();
+
+  const dict = {
+    hr: {
+      title: "Burek – admin narudžbe",
+      projectLabel: "Projekt:",
+      statusLabel: "Status:",
+      dateLabel: "Datum:",
+      refresh: "Osvježi",
+      shownPrefix: "Prikazano",
+      shownSuffix: "narudžbi.",
+      colTime: "Vrijeme",
+      colNamePhone: "Ime / telefon",
+      colItems: "Artikli",
+      colTotal: "Ukupno",
+      colStatus: "Status",
+      colAction: "Akcija",
+      filterOpen: "Samo otvorene (potvrđene, neisporučene)",
+      filterAll: "Sve potvrđene (uključujući isporučene i otkazane)",
+      dateToday: "Samo današnje",
+      dateAll: "Svi datumi",
+      statusOpen: "Potvrđeno",
+      statusDone: "Isporučeno",
+      statusCancel: "Otkazano",
+      statusDraft: "Nacrt / u tijeku",
+      loading: "Učitavanje...",
+      noOrders: "Nema narudžbi za zadane filtere.",
+      loadError: "Greška pri dohvaćanju narudžbi.",
+      btnMarkDelivered: "Označi isporučeno",
+      btnSaving: "Spremam...",
+      saveError: "Greška pri spremanju.",
+      timePickupPrefix: "Preuzimanje:",
+    },
+    de: {
+      title: "Burek – Bestellungen (Admin)",
+      projectLabel: "Projekt:",
+      statusLabel: "Status:",
+      dateLabel: "Datum:",
+      refresh: "Aktualisieren",
+      shownPrefix: "Angezeigt",
+      shownSuffix: "Bestellungen.",
+      colTime: "Zeit",
+      colNamePhone: "Name / Telefon",
+      colItems: "Artikel",
+      colTotal: "Gesamt",
+      colStatus: "Status",
+      colAction: "Aktion",
+      filterOpen: "Nur offene (bestätigt, nicht ausgeliefert)",
+      filterAll: "Alle bestätigten (inkl. ausgelieferte und stornierte)",
+      dateToday: "Nur heute",
+      dateAll: "Alle Daten",
+      statusOpen: "Bestätigt",
+      statusDone: "Ausgeliefert",
+      statusCancel: "Storniert",
+      statusDraft: "Entwurf / in Bearbeitung",
+      loading: "Wird geladen...",
+      noOrders: "Keine Bestellungen für die aktuellen Filter.",
+      loadError: "Fehler beim Laden der Bestellungen.",
+      btnMarkDelivered: "Als ausgeliefert markieren",
+      btnSaving: "Speichern...",
+      saveError: "Fehler beim Speichern.",
+      timePickupPrefix: "Abholung:",
+    },
+    en: {
+      title: "Burek – admin orders",
+      projectLabel: "Project:",
+      statusLabel: "Status:",
+      dateLabel: "Date:",
+      refresh: "Refresh",
+      shownPrefix: "Showing",
+      shownSuffix: "orders.",
+      colTime: "Time",
+      colNamePhone: "Name / phone",
+      colItems: "Items",
+      colTotal: "Total",
+      colStatus: "Status",
+      colAction: "Action",
+      filterOpen: "Only open (confirmed, not delivered)",
+      filterAll: "All confirmed (including delivered and cancelled)",
+      dateToday: "Today only",
+      dateAll: "All dates",
+      statusOpen: "Confirmed",
+      statusDone: "Delivered",
+      statusCancel: "Cancelled",
+      statusDraft: "Draft / in progress",
+      loading: "Loading...",
+      noOrders: "No orders for the selected filters.",
+      loadError: "Error while loading orders.",
+      btnMarkDelivered: "Mark as delivered",
+      btnSaving: "Saving...",
+      saveError: "Error while saving.",
+      timePickupPrefix: "Pickup:",
+    },
+  };
+
+  const LL = dict[lang] || dict.hr;
+
   res.send(`
 <!DOCTYPE html>
-<html lang="hr">
+<html lang="${lang}">
   <head>
     <meta charset="utf-8" />
-    <title>Burek – Admin narudžbe</title>
+    <title>${LL.title}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       body {
@@ -1007,47 +1111,63 @@ app.get("/admin", adminAuth, (req, res) => {
     </style>
   </head>
   <body>
-    <h1>Burek – admin narudžbe</h1>
+    <h1>${LL.title}</h1>
     <div class="toolbar">
-      <label>Projekt:
+      <label>${LL.projectLabel}
         <select id="project-select">
           <option value="burek01">burek01</option>
           <!-- Za novu pekaru: dodaj ovdje <option value="burek02">burek02</option> -->
         </select>
       </label>
-      <label>Status:
+      <label>${LL.statusLabel}
         <select id="status-select">
-          <option value="open">Samo otvorene (potvrđene, neisporučene)</option>
-          <option value="all">Sve narudžbe</option>
+          <option value="open">${LL.filterOpen}</option>
+          <option value="all">${LL.filterAll}</option>
         </select>
       </label>
-      <label>Datum:
+      <label>${LL.dateLabel}
         <select id="date-select">
-          <option value="today">Samo današnje</option>
-          <option value="all">Svi datumi</option>
+          <option value="today">${LL.dateToday}</option>
+          <option value="all">${LL.dateAll}</option>
         </select>
       </label>
-      <button id="refresh-btn" class="primary">Osvježi</button>
+      <button id="refresh-btn" class="primary">${LL.refresh}</button>
       <span id="info" class="small"></span>
     </div>
 
     <table>
       <thead>
         <tr>
-          <th>Vrijeme</th>
-          <th>Ime / telefon</th>
-          <th>Artikli</th>
-          <th>Ukupno</th>
-          <th>Status</th>
-          <th>Akcija</th>
+          <th>${LL.colTime}</th>
+          <th>${LL.colNamePhone}</th>
+          <th>${LL.colItems}</th>
+          <th>${LL.colTotal}</th>
+          <th>${LL.colStatus}</th>
+          <th>${LL.colAction}</th>
         </tr>
       </thead>
       <tbody id="orders-body">
-        <tr><td colspan="6">Učitavanje...</td></tr>
+        <tr><td colspan="6">${LL.loading}</td></tr>
       </tbody>
     </table>
 
     <script>
+      const TEXT = {
+        shownPrefix: "${LL.shownPrefix}",
+        shownSuffix: "${LL.shownSuffix}",
+        statusOpen: "${LL.statusOpen}",
+        statusDone: "${LL.statusDone}",
+        statusCancel: "${LL.statusCancel}",
+        statusDraft: "${LL.statusDraft}",
+        loading: "${LL.loading}",
+        noOrders: "${LL.noOrders}",
+        loadError: "${LL.loadError}",
+        btnMarkDelivered: "${LL.btnMarkDelivered}",
+        btnSaving: "${LL.btnSaving}",
+        saveError: "${LL.saveError}",
+        timePickupPrefix: "${LL.timePickupPrefix}"
+      };
+
       const tbody = document.getElementById('orders-body');
       const projectSel = document.getElementById('project-select');
       const statusSel = document.getElementById('status-select');
@@ -1056,7 +1176,7 @@ app.get("/admin", adminAuth, (req, res) => {
       const infoEl = document.getElementById('info');
 
       async function loadOrders() {
-        tbody.innerHTML = "<tr><td colspan='6'>Učitavanje...</td></tr>";
+        tbody.innerHTML = "<tr><td colspan='6'>" + TEXT.loading + "</td></tr>";
         infoEl.textContent = "";
         refreshBtn.disabled = true;
 
@@ -1076,10 +1196,10 @@ app.get("/admin", adminAuth, (req, res) => {
           }
 
           const orders = data.orders || [];
-          infoEl.textContent = "Prikazano " + orders.length + " narudžbi.";
+          infoEl.textContent = TEXT.shownPrefix + " " + orders.length + " " + TEXT.shownSuffix;
 
           if (!orders.length) {
-            tbody.innerHTML = "<tr><td colspan='6'>Nema narudžbi za zadane filtere.</td></tr>";
+            tbody.innerHTML = "<tr><td colspan='6'>" + TEXT.noOrders + "</td></tr>";
             refreshBtn.disabled = false;
             return;
           }
@@ -1101,30 +1221,30 @@ app.get("/admin", adminAuth, (req, res) => {
 
             let statusHtml = "";
             if (o.is_cancelled) {
-              statusHtml = "<span class='badge badge-cancel'>Otkazano</span>";
+              statusHtml = "<span class='badge badge-cancel'>" + TEXT.statusCancel + "</span>";
             } else if (o.is_delivered) {
-              statusHtml = "<span class='badge badge-done'>Isporučeno</span>";
+              statusHtml = "<span class='badge badge-done'>" + TEXT.statusDone + "</span>";
             } else if (o.is_finalized) {
-              statusHtml = "<span class='badge badge-open'>Potvrđeno</span>";
+              statusHtml = "<span class='badge badge-open'>" + TEXT.statusOpen + "</span>";
             } else {
-              statusHtml = "<span class='badge badge-draft'>Nacrt / u tijeku</span>";
+              statusHtml = "<span class='badge badge-draft'>" + TEXT.statusDraft + "</span>";
             }
 
             const btnDisabled = o.is_delivered || o.is_cancelled || !o.is_finalized;
 
             tr.innerHTML =
-              "<td class='nowrap'>" + createdStr + "<br><span class='small'>Preuzimanje: " + pickup + "</span></td>" +
+              "<td class='nowrap'>" + createdStr + "<br><span class='small'>" + TEXT.timePickupPrefix + " " + pickup + "</span></td>" +
               "<td>" + (o.user_name || "-") + "<br><span class='small'>" + (o.user_phone || "") + "</span></td>" +
               "<td>" + (parts.join(", ") || "-") + "</td>" +
               "<td>" + (o.total != null ? (o.total.toFixed ? o.total.toFixed(2) : o.total) + " €" : "-") + "</td>" +
               "<td>" + statusHtml + "</td>" +
-              "<td><button data-id='" + o.id + "' " + (btnDisabled ? "disabled" : "") + ">Označi isporučeno</button></td>";
+              "<td><button data-id='" + o.id + "' " + (btnDisabled ? "disabled" : "") + ">" + TEXT.btnMarkDelivered + "</button></td>";
 
             tbody.appendChild(tr);
           }
 
         } catch (err) {
-          tbody.innerHTML = "<tr><td colspan='6'>Greška pri dohvaćanju narudžbi.</td></tr>";
+          tbody.innerHTML = "<tr><td colspan='6'>" + TEXT.loadError + "</td></tr>";
           console.error(err);
         } finally {
           refreshBtn.disabled = false;
@@ -1136,7 +1256,8 @@ app.get("/admin", adminAuth, (req, res) => {
         if (!btn) return;
         const id = btn.getAttribute("data-id");
         btn.disabled = true;
-        btn.textContent = "Spremam...";
+        const originalText = btn.textContent;
+        btn.textContent = TEXT.btnSaving;
 
         try {
           const res = await fetch("/api/admin/orders/" + id + "/delivered", {
@@ -1146,15 +1267,15 @@ app.get("/admin", adminAuth, (req, res) => {
           if (data.error) {
             alert(data.error);
             btn.disabled = false;
-            btn.textContent = "Označi isporučeno";
+            btn.textContent = originalText;
             return;
           }
           await loadOrders();
         } catch (err) {
           console.error(err);
-          alert("Greška pri spremanju.");
+          alert(TEXT.saveError);
           btn.disabled = false;
-          btn.textContent = "Označi isporučeno";
+          btn.textContent = originalText;
         }
       });
 
