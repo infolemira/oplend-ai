@@ -1,150 +1,249 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="hr">
-<head>
-  <meta charset="utf-8" />
-  <title>Burek – proizvodi i popusti</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    body {
-      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-      margin: 0;
-      padding: 0;
-      background: #f4f4f5;
-    }
-    header {
-      background: #0ea5e9;
-      color: #fff;
-      padding: 12px 16px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    header h1 {
-      margin: 0;
-      font-size: 1.2rem;
-    }
-    nav a {
-      color: #fff;
-      margin-left: 12px;
-      text-decoration: none;
-      font-size: 0.9rem;
-    }
-    .container {
-      max-width: 1100px;
-      margin: 16px auto;
-      padding: 0 12px 24px;
-    }
-    .top-bar {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      margin-bottom: 12px;
-      flex-wrap: wrap;
-    }
-    select, input[type="text"], input[type="number"] {
-      padding: 4px 8px;
-      font-size: 0.9rem;
-    }
-    button {
-      padding: 6px 10px;
-      border-radius: 6px;
-      border: 1px solid #d4d4d8;
-      background: #e4e4e7;
-      cursor: pointer;
-      font-size: 0.9rem;
-    }
-    button.primary {
-      background: #22c55e;
-      border-color: #16a34a;
-      color: #fff;
-    }
-    button.danger {
-      background: #ef4444;
-      border-color: #b91c1c;
-      color: #fff;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      background: #fff;
-      border-radius: 8px;
-      overflow: hidden;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-      font-size: 0.85rem;
-    }
-    th, td {
-      padding: 8px 10px;
-      border-bottom: 1px solid #e4e4e7;
-      vertical-align: top;
-    }
-    th {
-      background: #f4f4f5;
-      text-align: left;
-      white-space: nowrap;
-    }
-    tr:last-child td {
-      border-bottom: none;
-    }
-    .badge {
-      display: inline-block;
-      padding: 2px 6px;
-      border-radius: 999px;
-      font-size: 0.75rem;
-    }
-    .badge-active {
-      background: #dcfce7;
-      color: #166534;
-    }
-    .badge-inactive {
-      background: #fee2e2;
-      color: #b91c1c;
-    }
-    .small-input {
-      width: 70px;
-    }
-    .wide-input {
-      width: 140px;
-    }
-  </style>
-</head>
-<body>
-  <header>
-    <h1>Burek – proizvodi i popusti</h1>
-    <nav>
-      <a href="/admin">Narudžbe</a>
-      <a href="/admin/products">Proizvodi &amp; popusti</a>
-      <a href="/admin/customers">Kupci &amp; kategorije</a>
-    </nav>
-  </header>
-
-  <div class="container">
-    <div class="top-bar">
-      <span><strong>Projekt:</strong></span>
-      <select id="project-select">
-        <option value="burek01">burek01</option>
-      </select>
-      <button id="btn-add" class="primary">Dodaj novi proizvod</button>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Burek – proizvodi i popusti</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 0;
+        padding: 0;
+        background: #f4f4f5;
+      }
+      .page {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 16px;
+      }
+      .card {
+        background: white;
+        border-radius: 12px;
+        padding: 16px;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+        margin-bottom: 16px;
+      }
+      .nav {
+        margin-bottom: 10px;
+      }
+      .nav a {
+        margin-right: 10px;
+        text-decoration: none;
+        color: #2563eb;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+      }
+      th,
+      td {
+        border-bottom: 1px solid #e4e4e7;
+        padding: 6px 8px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #f4f4f5;
+      }
+      input,
+      select {
+        width: 100%;
+        box-sizing: border-box;
+        border-radius: 8px;
+        border: 1px solid #d4d4d8;
+        padding: 4px 6px;
+        font-size: 0.85rem;
+      }
+      button {
+        border-radius: 8px;
+        border: none;
+        padding: 6px 10px;
+        cursor: pointer;
+        font-size: 0.85rem;
+      }
+      .btn-primary {
+        background: #f97316;
+        color: white;
+      }
+      .btn-secondary {
+        background: #e4e4e7;
+        color: #111827;
+      }
+      .small {
+        font-size: 0.78rem;
+        color: #6b7280;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="card">
+        <div class="nav">
+          <strong>Admin:</strong>
+          <a href="/admin">Narudžbe</a>
+          <a href="/admin/products">Proizvodi & popusti</a>
+          <a href="/admin/customers">Kupci & kategorije</a>
+        </div>
+        <h1>Proizvodi & popusti</h1>
+        <p class="small">
+          Uređivanje cjenika i popusta. Trenutno radi za projekt <strong>burek01</strong>.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Ime (HR)</th>
+              <th>Ime (DE)</th>
+              <th>Ime (EN)</th>
+              <th>Osnovna cijena (€)</th>
+              <th>Popust</th>
+              <th>Dozv. kategorije</th>
+              <th>Aktivan</th>
+              <th>Spremi</th>
+            </tr>
+          </thead>
+          <tbody id="products-body"></tbody>
+        </table>
+        <button id="add-product" class="btn-secondary" style="margin-top: 8px">
+          + Dodaj novi proizvod
+        </button>
+      </div>
     </div>
 
-    <table id="products-table">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>SKU</th>
-          <th>Ime (HR / DE / EN)</th>
-          <th>Cijena</th>
-          <th>Aktivan</th>
-          <th>Popust</th>
-          <th>Kategorije (allowed_categories)</th>
-          <th>Akcije</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr><td colspan="8">Učitavanje...</td></tr>
-      </tbody>
-    </table>
-  </div>
+    <script>
+      const tbody = document.getElementById("products-body");
+      const addBtn = document.getElementById("add-product");
 
-  <script src="/products-admin.js"></script>
-</body>
+      function renderRow(p) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><input data-field="sku" value="${p.sku || ""}"></td>
+          <td><input data-field="name_hr" value="${p.name_hr || ""}"></td>
+          <td><input data-field="name_de" value="${p.name_de || ""}"></td>
+          <td><input data-field="name_en" value="${p.name_en || ""}"></td>
+          <td><input data-field="base_price" type="number" step="0.01" value="${
+            p.base_price != null ? p.base_price : ""
+          }"></td>
+          <td>
+            <select data-field="discount_type">
+              <option value="" ${
+                !p.discount_type ? "selected" : ""
+              }>(nema)</option>
+              <option value="percentage" ${
+                p.discount_type === "percentage" ? "selected" : ""
+              }>Postotak (%)</option>
+              <option value="fixed" ${
+                p.discount_type === "fixed" ? "selected" : ""
+              }>Iznos (€)</option>
+            </select>
+            <input data-field="discount_value" type="number" step="0.01" placeholder="vrijednost" value="${
+              p.discount_value != null ? p.discount_value : ""
+            }" style="margin-top:4px;">
+            <input data-field="discount_name" placeholder="Naziv popusta (npr. Studentski)" value="${
+              p.discount_name || ""
+            }" style="margin-top:4px;">
+            <label style="display:block;margin-top:4px;font-size:0.8rem;">
+              <input type="checkbox" data-field="is_discount_active" ${
+                p.is_discount_active ? "checked" : ""
+              }> Popust aktivan
+            </label>
+          </td>
+          <td>
+            <input data-field="allowed_categories" placeholder="npr. student,fast_delivery" value="${
+              (p.allowed_categories || []).join(", ")
+            }">
+            <div class="small">CSV lista kategorija kupaca</div>
+          </td>
+          <td>
+            <label>
+              <input type="checkbox" data-field="is_active" ${
+                p.is_active !== false ? "checked" : ""
+              }> Aktivan
+            </label>
+          </td>
+          <td>
+            <button class="btn-primary" data-act="save">Spremi</button>
+          </td>
+        `;
+        tr.dataset.id = p.id || "";
+        return tr;
+      }
+
+      async function loadProducts() {
+        tbody.innerHTML = `<tr><td colspan="9">Učitavanje...</td></tr>`;
+        const resp = await fetch("/api/admin/products?project=burek01");
+        const data = await resp.json();
+        const products = data.products || [];
+        tbody.innerHTML = "";
+        for (const p of products) {
+          tbody.appendChild(renderRow(p));
+        }
+      }
+
+      tbody.addEventListener("click", async (e) => {
+        const btn = e.target.closest("button");
+        if (!btn) return;
+        if (btn.dataset.act !== "save") return;
+
+        const tr = btn.closest("tr");
+        const id = tr.dataset.id ? Number(tr.dataset.id) : null;
+        const getVal = (field) =>
+          tr.querySelector(`[data-field="${field}"]`)?.value ?? "";
+        const getChecked = (field) =>
+          tr.querySelector(`[data-field="${field}"]`)?.checked ?? false;
+
+        const payload = {
+          id,
+          projectId: "burek01",
+          sku: getVal("sku"),
+          name_hr: getVal("name_hr"),
+          name_de: getVal("name_de"),
+          name_en: getVal("name_en"),
+          base_price: Number(getVal("base_price") || 0),
+          discount_type: getVal("discount_type") || null,
+          discount_value:
+            getVal("discount_value") !== ""
+              ? Number(getVal("discount_value"))
+              : null,
+          discount_name: getVal("discount_name") || null,
+          is_discount_active: getChecked("is_discount_active"),
+          is_active: getChecked("is_active"),
+          allowed_categories: (getVal("allowed_categories") || "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        };
+
+        const resp = await fetch("/api/admin/products", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (!resp.ok) {
+          alert("Greška pri spremanju proizvoda.");
+          return;
+        }
+
+        await loadProducts();
+      });
+
+      addBtn.addEventListener("click", () => {
+        const tr = renderRow({
+          sku: "",
+          name_hr: "",
+          name_de: "",
+          name_en: "",
+          base_price: 0,
+          is_active: true,
+          is_discount_active: false,
+          allowed_categories: []
+        });
+        tbody.appendChild(tr);
+      });
+
+      loadProducts();
+    </script>
+  </body>
 </html>
