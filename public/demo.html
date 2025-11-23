@@ -1,1 +1,317 @@
+<!DOCTYPE html>
+<html lang="hr">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Burek – chat</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        background: #f4f4f5;
+        margin: 0;
+        padding: 0;
+      }
+      .page {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 16px;
+      }
+      .card {
+        background: white;
+        border-radius: 12px;
+        padding: 16px;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+        margin-bottom: 16px;
+      }
+      .chat-window {
+        border-radius: 12px;
+        border: 1px solid #e4e4e7;
+        background: #ffffff;
+        height: 550px;
+        display: flex;
+        flex-direction: column;
+      }
+      .chat-messages {
+        flex: 1;
+        padding: 12px;
+        overflow-y: auto;
+      }
+      .msg {
+        margin-bottom: 10px;
+        max-width: 85%;
+      }
+      .msg-user {
+        text-align: right;
+        margin-left: auto;
+      }
+      .msg-assistant {
+        text-align: left;
+        margin-right: auto;
+      }
+      .bubble {
+        display: inline-block;
+        padding: 8px 12px;
+        border-radius: 999px;
+      }
+      .bubble-user {
+        background: #f97316;
+        color: white;
+        border-bottom-right-radius: 4px;
+      }
+      .bubble-assistant {
+        background: #e4e4e7;
+        color: #111827;
+        border-bottom-left-radius: 4px;
+      }
+      .chat-input {
+        border-top: 1px solid #e4e4e7;
+        padding: 8px;
+        display: flex;
+        gap: 8px;
+      }
+      .chat-input textarea {
+        flex: 1;
+        resize: none;
+        border-radius: 999px;
+        border: 1px solid #d4d4d8;
+        padding: 8px 12px;
+        font-family: inherit;
+        font-size: 0.95rem;
+        min-height: 38px;
+        max-height: 80px;
+      }
+      .chat-input button {
+        border-radius: 999px;
+        border: none;
+        padding: 0 18px;
+        background: #f97316;
+        color: white;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .chat-input button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .lang-switch {
+        display: flex;
+        gap: 6px;
+        justify-content: flex-end;
+        margin-bottom: 8px;
+      }
+      .lang-btn {
+        border-radius: 999px;
+        border: 1px solid #d4d4d8;
+        padding: 3px 10px;
+        font-size: 0.8rem;
+        background: #f4f4f5;
+        cursor: pointer;
+      }
+      .lang-btn.is-active {
+        background: #f97316;
+        border-color: #f97316;
+        color: white;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="lang-switch">
+        <button class="lang-btn is-active" data-lang="hr">HR</button>
+        <button class="lang-btn" data-lang="de">DE</button>
+        <button class="lang-btn" data-lang="en">EN</button>
+      </div>
 
+      <div class="card">
+        <h1 id="hero-title">Rezerviraj svoj burek putem chata 🥐</h1>
+        <p id="hero-lead">
+          Naruči burek sa sirom, mesom ili krumpirom putem jednostavnog chat
+          asistenta. Bez aplikacije, bez registracije — samo pošalji poruku
+          kao na WhatsAppu.
+        </p>
+      </div>
+
+      <div class="card">
+        <h2 id="chat-title">Chat narudžba</h2>
+        <p id="chat-lead">
+          Upišite svoju narudžbu — bot će vas voditi kroz cijeli proces.
+        </p>
+
+        <div class="chat-window">
+          <div id="chat-messages" class="chat-messages"></div>
+          <div class="chat-input">
+            <textarea
+              id="chat-input"
+              rows="1"
+              placeholder="Napišite poruku..."
+            ></textarea>
+            <button id="chat-send">Pošalji</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        const params = new URLSearchParams(window.location.search);
+        let currentLang = (params.get("lang") || "hr").toLowerCase();
+        if (currentLang.startsWith("de")) currentLang = "de";
+        else if (currentLang.startsWith("en")) currentLang = "en";
+        else currentLang = "hr";
+
+        const messagesEl = document.getElementById("chat-messages");
+        const inputEl = document.getElementById("chat-input");
+        const sendBtn = document.getElementById("chat-send");
+        const langButtons = document.querySelectorAll(".lang-btn");
+
+        const heroTitle = document.getElementById("hero-title");
+        const heroLead = document.getElementById("hero-lead");
+        const chatTitle = document.getElementById("chat-title");
+        const chatLead = document.getElementById("chat-lead");
+
+        const texts = {
+          hr: {
+            heroTitle: "Rezerviraj svoj burek putem chata 🥐",
+            heroLead:
+              "Naruči burek sa sirom, mesom ili krumpirom putem jednostavnog chat asistenta. Bez aplikacije, bez registracije — samo pošalji poruku kao na WhatsAppu.",
+            chatTitle: "Chat narudžba",
+            chatLead:
+              "Upišite svoju narudžbu — bot će vas voditi kroz cijeli proces.",
+            placeholder: "Napišite poruku...",
+            send: "Pošalji"
+          },
+          de: {
+            heroTitle: "Bestelle deinen Burek per Chat 🥐",
+            heroLead:
+              "Bestelle Burek mit Käse, Fleisch oder Kartoffeln über unseren einfachen Chat-Assistenten. Keine App, keine Registrierung – einfach wie bei WhatsApp schreiben.",
+            chatTitle: "Chat-Bestellung",
+            chatLead:
+              "Geben Sie Ihre Bestellung ein – der Bot führt Sie durch den gesamten Ablauf.",
+            placeholder: "Nachricht eingeben...",
+            send: "Senden"
+          },
+          en: {
+            heroTitle: "Order your burek via chat 🥐",
+            heroLead:
+              "Order burek with cheese, meat or potatoes through our simple chat assistant. No app, no registration – just send a message like on WhatsApp.",
+            chatTitle: "Chat order",
+            chatLead:
+              "Type your order — the bot will guide you through the whole process.",
+            placeholder: "Type a message...",
+            send: "Send"
+          }
+        };
+
+        let history = [];
+
+        function renderTexts() {
+          const t = texts[currentLang];
+          heroTitle.textContent = t.heroTitle;
+          heroLead.textContent = t.heroLead;
+          chatTitle.textContent = t.chatTitle;
+          chatLead.textContent = t.chatLead;
+          inputEl.placeholder = t.placeholder;
+          sendBtn.textContent = t.send;
+
+          langButtons.forEach((btn) => {
+            btn.classList.toggle(
+              "is-active",
+              btn.getAttribute("data-lang") === currentLang
+            );
+          });
+        }
+
+        function addMessage(role, content) {
+          const wrapper = document.createElement("div");
+          wrapper.className =
+            "msg " + (role === "user" ? "msg-user" : "msg-assistant");
+          const bubble = document.createElement("div");
+          bubble.className =
+            "bubble " +
+            (role === "user" ? "bubble-user" : "bubble-assistant");
+          bubble.textContent = content;
+          wrapper.appendChild(bubble);
+          messagesEl.appendChild(wrapper);
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        async function sendMessage() {
+          const text = inputEl.value.trim();
+          if (!text) return;
+
+          addMessage("user", text);
+          history.push({ role: "user", content: text });
+          inputEl.value = "";
+          inputEl.disabled = true;
+          sendBtn.disabled = true;
+
+          try {
+            const resp = await fetch("/api/chat", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                projectId: "burek01",
+                lang: currentLang,
+                messages: history
+              })
+            });
+
+            const data = await resp.json();
+            const reply = data.reply || "";
+            addMessage("assistant", reply.replace(/JSON_ORDER:.*/s, "").trim());
+            history.push({ role: "assistant", content: reply });
+          } catch (e) {
+            console.error(e);
+            addMessage(
+              "assistant",
+              "Došlo je do greške. Pokušajte ponovo za nekoliko trenutaka."
+            );
+          } finally {
+            inputEl.disabled = false;
+            sendBtn.disabled = false;
+            inputEl.focus();
+          }
+        }
+
+        sendBtn.addEventListener("click", sendMessage);
+        inputEl.addEventListener("keydown", function (e) {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+          }
+        });
+
+        langButtons.forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const lang = btn.getAttribute("data-lang");
+            currentLang = lang;
+            renderTexts();
+
+            // promijeni URL param ali ostavi chat povijest
+            const url = new URL(window.location.href);
+            url.searchParams.set("lang", lang);
+            window.history.replaceState({}, "", url.toString());
+          });
+        });
+
+        renderTexts();
+
+        // inicijalna poruka
+        addMessage(
+          "assistant",
+          texts[currentLang].heroLead +
+            "\n\n" +
+            "Napišite što želite naručiti (vrsta bureka, broj komada, vrijeme preuzimanja)."
+        );
+        history.push({
+          role: "assistant",
+          content:
+            "Dobrodošli! Napišite što želite naručiti (vrsta bureka, broj komada, vrijeme preuzimanja)."
+        });
+      })();
+    </script>
+  </body>
+</html>
