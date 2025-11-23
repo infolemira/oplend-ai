@@ -1,1 +1,58 @@
+<!doctype html>
+<html lang="hr">
+<head>
+<meta charset="utf-8" />
+<title>Oplend – Admin narudžbe</title>
+<link rel="stylesheet" href="/admin.css">
+</head>
+<body>
 
+<div class="container">
+
+  <h1>Admin – Narudžbe</h1>
+
+  <div class="top-links">
+    <a href="/admin/products">📦 Proizvodi</a>
+    <a href="/admin/customers">👤 Kupci</a>
+  </div>
+
+  <div class="filters">
+    <label>Status:
+      <select id="filter-status">
+        <option value="all">Sve (bez nacrta)</option>
+        <option value="open">Samo aktivne</option>
+        <option value="delivered">Isporučene</option>
+        <option value="cancelled">Otkazane</option>
+      </select>
+    </label>
+
+    <label>Datum:
+      <select id="filter-date">
+        <option value="today">Danas</option>
+        <option value="all">Svi datumi</option>
+      </select>
+    </label>
+  </div>
+
+  <table id="orders-table">
+    <thead>
+      <tr>
+        <th>Vrijeme</th>
+        <th>Klijent</th>
+        <th>Telefon</th>
+        <th>Proizvodi</th>
+        <th>Ukupno</th>
+        <th>Status</th>
+        <th>Akcija</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <div id="status" class="status"></div>
+
+</div>
+
+<script src="/admin.js"></script>
+</body>
+</html>
