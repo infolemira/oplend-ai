@@ -1,1247 +1,891 @@
-// server.js – Oplend AI (burek) s products, customers i admin sučeljem
+// server.js – kompletna verzija s:
+//
+// - PROJECTS (burek01)
+// - više jezika (HR / DE / EN) u /api/projects/:id/config
+// - Supabase orders + customers + products
+// - popusti ovisno o kategorijama kupaca
+// - admin za narudžbe, proizvode, kupce
+// - basic auth za admin
+// - rate-limit za /api/chat
+// --------------------------------------------------------
 
 import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
-import bcrypt from "bcryptjs";
 import rateLimit from "express-rate-limit";
 import basicAuth from "express-basic-auth";
 
-// ----------------------------
-//  APP & CONFIG
-// ----------------------------
+const PORT = process.env.PORT || 10000;
 
 const app = express();
+
+// ⚠️ VAŽNO ZA RENDER + rate-limit
+app.set("trust proxy", 1);
+
+// ----- MIDDLEWARE ---------------------------------------------------------
+
+app.use(cors());
 app.use(express.json());
-app.use(cors({ origin: "*", methods: "*", allowedHeaders: "*" }));
 
-// statički fajlovi (admin HTML, JS, CSS iz /public)
-app.use(express.static("public"));
+// Static fajlovi za admin frontend (public folder)
+import path from "path";
+import { fileURLToPath } from "url";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-const {
-  OPENAI_API_KEY,
-  SUPABASE_URL,
-  SUPABASE_SERVICE_KEY,
-  ADMIN_USERNAME,
-  ADMIN_PASSWORD,
-} = process.env;
+app.use(express.static(path.join(__dirname, "public")));
 
-const openai = new OpenAI({
-  apiKey: OPENAI_API_KEY,
-});
-
-const supabase =
-  SUPABASE_URL && SUPABASE_SERVICE_KEY
-    ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-    : null;
-
-// ----------------------------
-//  PROJEKT
-// ----------------------------
-
-const PROJECTS = {
-  burek01: {
-    lang: "multi",
-    title: "Burek – Online narudžba",
-    // fallback cijene ako nema products u bazi
-    pricing: { kaese: 5, fleisch: 5, kartoffeln: 5 },
-    systemPrompt: `
-Du bist ein Bestell-Assistent für eine Bäckerei. Du bearbeitest ausschließlich Bestellungen für:
-1) Burek mit Käse
-2) Burek mit Fleisch
-3) Burek mit Kartoffeln
-
-SPRACHE (SEHR WICHTIG):
-- Antworte IMMER in der gleichen Sprache wie in der LETZTEN Nachricht des Kunden:
-  * Wenn der Kunde auf Deutsch schreibt → antworte auf Deutsch.
-  * Wenn der Kunde auf Englisch schreibt → antworte auf Englisch.
-  * Ako piše na bosanskom/hrvatskom/srpskom → odgovaraj na tom jeziku.
-- Nemoj mijenjati jezik usred razgovora, osim ako korisnik to izričito zatraži.
-
----------------------------------------------
-IZBJEGAVAJ PONAVLJANJE ISTIH PITANJA
----------------------------------------------
-
-- Prije nego što nešto pitaš (npr. ime, broj telefona, password, vrijeme preuzimanja),
-  prvo PROČITAJ CIJELI dosadašnji razgovor.
-- Ako je podatak već JASNO naveden u ovom chatu:
-  - NE pitaj ponovo isto pitanje.
-  - Umjesto toga, koristi već postojeći podatak.
-
----------------------------------------------
-STANDARDNI FLOW NOVE NARUDŽBE
----------------------------------------------
-
-1) KADA KLIJENT NAPIŠE NARUDŽBU (vrste + količine)
-- Ukratko ponovi narudžbu (npr: "Dakle, želite 2x sir i 1x meso.").
-- ODMAH NAKON TOGA obavezno postavi pitanje:
-  - DE: "Ist das alles?"
-  - EN: "Is that everything?"
-  - BHS: "Da li je to sve?" / "Je li to sve?"
-
-→ NE PITAJ za vrijeme, ime ili telefon DOK KLIJENT NE POTVRDI da je to sve.
-
-2) KADA KLIJENT POTVRDI DA JE TO SVE
-→ Pitaj za vrijeme preuzimanja.
-
-3) KADA NAPIŠE VRIJEME
-→ Pitaj za ime i broj telefona.
-
----------------------------------------------
-PASSWORD LOGIKA
----------------------------------------------
-
-- Identitet klijenta: BROJ TELEFONA + PASSWORD.
-- Broj telefona može imati samo JEDAN password.
-
-NOVI KLIJENT:
-- Nakon imena + telefona:
-  - objasni da postavlja password za ubuduće
-  - pitaš: "Molim vas unesite password koji želite koristiti ubuduće."
-  - META: passwordAction="set", password="..."
-
-POSTOJEĆI KLIJENT:
-- NE traži novi password.
-- PRIJE završne potvrde narudžbe:
-  - zamoli da potvrdi narudžbu unošenjem postojećeg passworda
-  - META: passwordAction="confirm", password="..."
-
-ZABORAVLJEN PASSWORD:
-- Objasni da novi password dobiva tek nakon provjere u pekari.
-- META: newPasswordRequested=true.
-
-⚠️ TI NE ZNAŠ JE LI PASSWORD TOČAN
-- Nikad ne govori "pogrešan password".
-- Samo šalješ password i passwordAction u META.
-- Backend provjerava.
-
----------------------------------------------
-OTKAZIVANJE / IZMJENA
----------------------------------------------
-
-- Novi chat: korisnik želi otkazati ili ispraviti prethodnu narudžbu.
-- Tražiš telefon (+ password ako postoji).
-- Kad potvrdi:
-  - Otkazivanje:
-    - META: orderAction="cancel_last", isFinalOrder=true, closeChat=true
-  - Izmjena:
-    - prikupi novu narudžbu,
-    - META: orderAction="modify_last", isFinalOrder=true, closeChat=true
-
----------------------------------------------
-TECHNICAL META
----------------------------------------------
-
-Na KRAJU SVAKOG odgovora:
-
-##META {...}
-
-JSON:
-  "phone": string|null
-  "name": string|null
-  "pickupTime": string|null
-  "passwordAction": "none" | "set" | "confirm"
-  "password": string|null
-  "isFinalOrder": true/false
-  "closeChat": true/false
-  "newPasswordRequested": true/false
-  "orderAction": "none" | "cancel_last" | "modify_last"
-    `,
-  },
-};
-
-// ----------------------------
-//  HELPERS
-// ----------------------------
-
-function parseQuantities(text) {
-  const t = (text || "").toLowerCase();
-  const get = (regex) => {
-    const m = t.match(regex);
-    return m ? Number(m[1]) : 0;
-  };
-
-  return {
-    kaese: get(/(\d+).{0,15}(käse|kaese|sir)/),
-    fleisch: get(/(\d+).{0,15}(fleisch|meso)/),
-    kartoffeln: get(/(\d+).{0,20}(kartoffeln?|krompir|krumpir)/),
-  };
-}
-
-function detectLang(text) {
-  const t = (text || "").toLowerCase();
-  if (/[šđćčž]/.test(t)) return "bhs";
-  if (t.includes(" der ") || t.includes(" die ") || t.includes(" das "))
-    return "de";
-  if (t.includes("thanks") || t.includes("thank")) return "en";
-  return "auto";
-}
-
-function detectPhone(text) {
-  const m = (text || "").match(/(\+?\d[\d\s/\-]{6,})/);
-  if (!m) return null;
-  return m[1].replace(/[^\d+]/g, "");
-}
-
-function getClientIp(req) {
-  return (
-    req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
-    req.connection?.remoteAddress ||
-    null
-  );
-}
-
-// customers helperi
-async function getCustomerByPhone(phone) {
-  if (!supabase || !phone) return null;
-  try {
-    const { data, error } = await supabase
-      .from("customers")
-      .select("password_hash, categories, name")
-      .eq("phone", phone)
-      .order("created_at", { ascending: false })
-      .limit(1);
-
-    if (error || !data || data.length === 0) return null;
-    return data[0];
-  } catch (e) {
-    console.error("getCustomerByPhone error:", e);
-    return null;
-  }
-}
-
-async function upsertCustomer(phone, passwordPlain, name) {
-  if (!supabase || !phone || !passwordPlain) return;
-  try {
-    const hash = await bcrypt.hash(passwordPlain, 10);
-    const payload = {
-      phone,
-      password_hash: hash,
-    };
-    if (name) payload.name = name;
-
-    const { error } = await supabase
-      .from("customers")
-      .upsert(payload, { onConflict: "phone" });
-
-    if (error) {
-      console.error("upsertCustomer error:", error);
-    }
-  } catch (e) {
-    console.error("upsertCustomer hash error:", e);
-  }
-}
-
-// products helperi + popust logika
-async function getProductsForProject(projectId) {
-  if (!supabase) return [];
-  try {
-    const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .eq("project_id", projectId)
-      .eq("is_active", true);
-
-    if (error || !data) return [];
-    return data;
-  } catch (e) {
-    console.error("getProductsForProject error:", e);
-    return [];
-  }
-}
-
-function computeUnitPrice(product, customerCategories = []) {
-  const now = new Date();
-  let price = Number(product.base_price);
-
-  if (product.discount_price == null) {
-    return price;
-  }
-
-  const startOk =
-    !product.discount_start || now >= new Date(product.discount_start);
-  const endOk =
-    !product.discount_end || now <= new Date(product.discount_end);
-
-  if (!startOk || !endOk) {
-    return price;
-  }
-
-  const allowed = product.discount_allowed_categories;
-  const appliesToEveryone =
-    !allowed || (Array.isArray(allowed) && allowed.length === 0);
-
-  if (appliesToEveryone) {
-    return Number(product.discount_price);
-  }
-
-  const cats = Array.isArray(customerCategories)
-    ? customerCategories
-    : [];
-  const hasMatch = cats.some((c) => allowed.includes(c));
-
-  if (hasMatch) {
-    return Number(product.discount_price);
-  }
-
-  return price;
-}
-
-function buildPricingInstruction(products, lang, customerCategories) {
-  if (!products || products.length === 0) return "";
-
-  const lines = [];
-
-  let header;
-  if (lang === "de") {
-    header =
-      "AKTUELLE PREISE für diesen Kunden (inklusive individueller Rabatte):";
-  } else if (lang === "en") {
-    header =
-      "CURRENT PRICES for this customer (including applicable discounts):";
-  } else {
-    header =
-      "TRENUTNI CJENIK za ovog kupca (uključujući popuste za koje ima pravo):";
-  }
-  lines.push(header);
-
-  for (const p of products) {
-    const unit = computeUnitPrice(p, customerCategories);
-    const base = Number(p.base_price);
-    const hasDiscount =
-      p.discount_price != null && unit < base;
-
-    if (hasDiscount) {
-      const discName = p.discount_name || "popust";
-      if (lang === "de") {
-        lines.push(
-          `- ${p.name}: ${unit.toFixed(
-            2
-          )} € mit Rabatt "${discName}" (Standardpreis ${base.toFixed(
-            2
-          )} €)`
-        );
-      } else if (lang === "en") {
-        lines.push(
-          `- ${p.name}: ${unit.toFixed(
-            2
-          )} € with discount "${discName}" (regular price ${base.toFixed(
-            2
-          )} €)`
-        );
-      } else {
-        lines.push(
-          `- ${p.name}: ${unit.toFixed(
-            2
-          )} € uz popust "${discName}" (redovna cijena ${base.toFixed(
-            2
-          )} €)`
-        );
-      }
-    } else {
-      lines.push(`- ${p.name}: ${unit.toFixed(2)} €`);
-    }
-  }
-
-  return lines.join("\n");
-}
-
-// ----------------------------
-//  RATE LIMIT ZA /api/chat
-// ----------------------------
-
+// Rate limit samo za /api/chat
 const chatLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 20,
-  message: { error: "Previše zahtjeva, pokušajte kasnije." },
+  windowMs: 60 * 1000, // 1 minuta
+  max: 30,             // max 30 zahtjeva / min / IP
+  standardHeaders: true,
+  legacyHeaders: false
 });
 
 app.use("/api/chat", chatLimiter);
 
-// ----------------------------
-//  BASIC AUTH ZA ADMIN
-// ----------------------------
+// ----- BASIC AUTH ZA ADMIN -----------------------------------------------
 
-const adminUsers =
-  ADMIN_USERNAME && ADMIN_PASSWORD
-    ? { [ADMIN_USERNAME]: ADMIN_PASSWORD }
-    : null;
+let adminUsers = {};
+if (process.env.ADMIN_USER && process.env.ADMIN_PASS) {
+  adminUsers[process.env.ADMIN_USER] = process.env.ADMIN_PASS;
+}
+const adminAuth =
+  Object.keys(adminUsers).length > 0
+    ? basicAuth({
+        users: adminUsers,
+        challenge: true
+      })
+    : (req, res, next) => {
+        console.warn("⚠️ ADMIN bez zaštite (ADMIN_USER/ADMIN_PASS nisu postavljeni)");
+        next();
+      };
 
-const adminAuthMiddleware = adminUsers
-  ? basicAuth({
-      users: adminUsers,
-      challenge: true,
-      unauthorizedResponse: () => "Unauthorized",
-    })
-  : (req, res, next) => next();
+// ----- OPENAI & SUPABASE -------------------------------------------------
 
-// ----------------------------
-//  CONFIG ENDPOINT
-// ----------------------------
-
-app.get("/api/projects/:id/config", (req, res) => {
-  const { id } = req.params;
-  const { lang = "hr" } = req.query;
-  const p = PROJECTS[id] || PROJECTS["burek01"];
-
-  let description, welcome;
-  if (lang === "de") {
-    description = "Bestellen Sie Burek: Käse | Fleisch | Kartoffeln";
-    welcome =
-      "Willkommen! Bitte geben Sie Sorte und Anzahl der Bureks ein.";
-  } else if (lang === "en") {
-    description = "Order burek: cheese | meat | potato";
-    welcome =
-      "Welcome! Please enter burek type and number of pieces.";
-  } else {
-    description = "Naručite burek: sir | meso | krumpir";
-    welcome =
-      "Dobrodošli! Molimo upišite vrstu bureka i broj komada.";
-  }
-
-  res.json({
-    title: p.title,
-    description,
-    welcome,
-    pricing: p.pricing, // fallback
-  });
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
 });
 
-// ----------------------------
-//  CHAT ENDPOINT
-// ----------------------------
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+);
 
-app.post("/api/chat", async (req, res) => {
-  try {
-    const client_ip = getClientIp(req);
-    const user_agent = req.headers["user-agent"] || null;
+// ----- PROJECT KONFIG ----------------------------------------------------
 
-    const {
-      projectId = "burek01",
-      message = "",
-      history = [],
-    } = req.body;
-    const p = PROJECTS[projectId] || PROJECTS["burek01"];
-
-    const safeHistory = Array.isArray(history)
-      ? history.filter((m) => m && typeof m.content === "string")
-      : [];
-
-    const lastUser =
-      safeHistory.filter((x) => x.role === "user").pop()?.content ||
-      message;
-
-    const lang = detectLang(lastUser);
-    const languageInstruction =
-      lang === "de"
-        ? "Antworte ausschließlich auf Deutsch."
-        : lang === "en"
-        ? "Respond strictly in English."
-        : lang === "bhs"
-        ? "Odgovaraj isključivo na bosanskom/hrvatskom/srpskom jeziku."
-        : "Antwort in der Sprache der letzten Benutzer-Nachricht.";
-
-    const allUserTextForPhone =
-      safeHistory
-        .filter((m) => m.role === "user")
-        .map((m) => m.content)
-        .join("\n") + "\n" + message;
-
-    const phoneCandidate = detectPhone(allUserTextForPhone);
-    let customer = null;
-    let existingPasswordHash = null;
-    let customerCategories = [];
-
-    if (phoneCandidate && supabase) {
-      customer = await getCustomerByPhone(phoneCandidate);
-      existingPasswordHash = customer?.password_hash || null;
-      customerCategories = Array.isArray(customer?.categories)
-        ? customer.categories
-        : [];
+const PROJECTS = {
+  burek01: {
+    id: "burek01",
+    title: {
+      hr: "Burek – chat narudžba",
+      de: "Burek – Chat-Bestellung",
+      en: "Burek – Chat order"
+    },
+    pricing: {
+      currency: "EUR"
     }
+  }
+};
 
-    const products = await getProductsForProject(projectId);
-    const productsByCode = {};
-    for (const prod of products) {
-      productsByCode[prod.code] = prod;
+const CONFIG_TEXTS = {
+  hr: {
+    description: "Naruči burek: sir | meso | krumpir",
+    welcome: "Dobrodošli! Molimo upišite vrstu i količinu bureka."
+  },
+  de: {
+    description: "Bestellen Sie Burek: Käse | Fleisch | Kartoffeln",
+    welcome:
+      "Willkommen! Bitte geben Sie Sorte und Anzahl der Bureks ein."
+  },
+  en: {
+    description: "Order burek: cheese | meat | potato",
+    welcome:
+      "Welcome! Please enter the type of burek and the number of pieces."
+  }
+};
+
+function getConfigTexts(lang) {
+  if (lang === "de") return CONFIG_TEXTS.de;
+  if (lang === "en") return CONFIG_TEXTS.en;
+  return CONFIG_TEXTS.hr;
+}
+
+// ----- HELPER FUNKCIJE ---------------------------------------------------
+
+// IP + user-agent iz requesta
+function getRequestMeta(req) {
+  const ip =
+    (req.headers["x-forwarded-for"] || "").toString().split(",")[0].trim() ||
+    req.socket.remoteAddress ||
+    null;
+
+  const ua = req.headers["user-agent"] || null;
+  return { ip, ua };
+}
+
+// Dohvat kupca iz customers tablice
+async function findCustomer(projectId, phone) {
+  const { data, error } = await supabase
+    .from("customers")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("phone", phone)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Supabase error findCustomer:", error);
+    return null;
+  }
+  return data;
+}
+
+// Spremi ili ažuriraj kupca (telefon + PIN + ime + kategorije)
+async function upsertCustomer({ projectId, phone, pin, name, categories }) {
+  const { data, error } = await supabase
+    .from("customers")
+    .upsert(
+      {
+        project_id: projectId,
+        phone,
+        pin,
+        name: name || null,
+        categories: categories || []
+      },
+      { onConflict: "project_id,phone" }
+    )
+    .select()
+    .maybeSingle();
+
+  if (error) {
+    console.error("Supabase error upsertCustomer:", error);
+    return null;
+  }
+  return data;
+}
+
+// Dohvat proizvoda za projekt
+async function getProductsForProject(projectId) {
+  const { data, error } = await supabase
+    .from("products")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("is_active", true);
+
+  if (error) {
+    console.error("Supabase error getProductsForProject:", error);
+    return [];
+  }
+  return data || [];
+}
+
+// Izračunaj jediničnu cijenu s popustom
+function computeUnitPrice(product, customerCategories) {
+  const base = Number(product.base_price || 0);
+
+  if (
+    !product.is_discount_active ||
+    !product.discount_type ||
+    product.discount_value == null
+  ) {
+    return { unitPrice: base, discountName: null };
+  }
+
+  const allowed = product.allowed_categories || [];
+  const custCats = customerCategories || [];
+
+  if (allowed.length > 0) {
+    const hasMatch = custCats.some((c) => allowed.includes(c));
+    if (!hasMatch) {
+      return { unitPrice: base, discountName: null };
     }
+  }
 
-    let internalUserStatusMessage = null;
-    if (phoneCandidate) {
-      internalUserStatusMessage = {
-        role: "system",
-        content:
-          "INTERNAL_USER_STATUS: phone=" +
-          phoneCandidate +
-          ", hasPassword=" +
-          (existingPasswordHash ? "true" : "false") +
-          ". Verwende diese Info NUR intern...",
-      };
-    }
+  const dv = Number(product.discount_value);
+  let finalPrice = base;
 
-    const messagesForAI = [
-      { role: "system", content: p.systemPrompt },
-      { role: "system", content: languageInstruction },
-    ];
+  if (product.discount_type === "percent") {
+    finalPrice = base * (1 - dv / 100);
+  } else if (product.discount_type === "amount") {
+    finalPrice = base - dv;
+  }
 
-    const pricingInstruction = buildPricingInstruction(
-      products,
-      lang,
+  if (finalPrice < 0) finalPrice = 0;
+
+  return {
+    unitPrice: finalPrice,
+    discountName: product.discount_name || null
+  };
+}
+
+// Izračun cijelog računa na osnovu items + products + kategorija kupca
+function computeOrderTotals({ items, products, customerCategories }) {
+  const productMap = {};
+  for (const p of products) {
+    productMap[p.sku] = p;
+  }
+
+  let total = 0;
+  const lineItems = [];
+
+  for (const [sku, qtyRaw] of Object.entries(items || {})) {
+    const qty = Number(qtyRaw || 0);
+    if (!qty || qty <= 0) continue;
+
+    const product = productMap[sku];
+    if (!product) continue;
+
+    const { unitPrice, discountName } = computeUnitPrice(
+      product,
       customerCategories
     );
-    if (pricingInstruction) {
-      messagesForAI.push({
-        role: "system",
-        content: pricingInstruction,
-      });
-    }
+    const lineTotal = unitPrice * qty;
+    total += lineTotal;
 
-    if (internalUserStatusMessage) {
-      messagesForAI.push(internalUserStatusMessage);
-    }
-
-    messagesForAI.push(...safeHistory, {
-      role: "user",
-      content: message,
+    lineItems.push({
+      sku,
+      quantity: qty,
+      base_price: Number(product.base_price || 0),
+      unit_price: unitPrice,
+      line_total: lineTotal,
+      discount_name: discountName
     });
-
-    const ai = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: messagesForAI,
-    });
-
-    let reply = ai.choices?.[0]?.message?.content || "OK.";
-
-    // META
-    let meta = null;
-    const metaMatch = reply.match(/##META\s+(\{[\s\S]*\})\s*$/);
-    if (metaMatch) {
-      const jsonStr = metaMatch[1];
-      try {
-        meta = JSON.parse(jsonStr);
-      } catch (e) {
-        console.error("META parse error:", e);
-      }
-      reply = reply.replace(/##META[\s\S]*$/, "").trim();
-    }
-
-    // KOLIČINE + CIJENA (uz popuste)
-    const allUserTextForQty =
-      safeHistory
-        .filter((m) => m.role === "user")
-        .map((m) => m.content)
-        .join("\n") + "\n" + message;
-
-    const qty = parseQuantities(allUserTextForQty);
-    const fallbackPricing = p.pricing || {};
-    const codes = ["kaese", "fleisch", "kartoffeln"];
-
-    let total = 0;
-    let totalPieces = 0;
-    const partsLabel = [];
-    const discountNotes = [];
-
-    for (const code of codes) {
-      const q = qty[code] || 0;
-      if (!q) continue;
-      const product = productsByCode[code];
-
-      let base = null;
-      let unitPrice = null;
-      let hasDiscount = false;
-      let discountName = null;
-
-      if (product) {
-        base = Number(product.base_price);
-        unitPrice = computeUnitPrice(product, customerCategories);
-        hasDiscount =
-          product.discount_price != null && unitPrice < base;
-        discountName = product.discount_name || null;
-      } else {
-        base = fallbackPricing[code] || 0;
-        unitPrice = base;
-      }
-
-      total += unitPrice * q;
-      totalPieces += q;
-
-      if (code === "kaese") partsLabel.push(`${q}x Käse`);
-      if (code === "fleisch") partsLabel.push(`${q}x Fleisch`);
-      if (code === "kartoffeln") partsLabel.push(`${q}x Kartoffeln`);
-
-      if (hasDiscount && discountName) {
-        discountNotes.push({
-          code,
-          discountName,
-          unitPrice,
-          base,
-          quantity: q,
-          name: product ? product.name : code,
-        });
-      }
-    }
-
-    if (totalPieces > 0 && !reply.includes("€")) {
-      let priceLine = "";
-      const partsText = partsLabel.join(", ");
-      const totalText = total.toFixed(2) + " €";
-      const anyDiscount = discountNotes.length > 0;
-
-      if (lang === "bhs") {
-        priceLine = `Ukupna cijena (${partsText}): ${totalText}.`;
-        if (anyDiscount) {
-          const details = discountNotes
-            .map(
-              (d) =>
-                `${d.name}: ${d.quantity}x po ${d.unitPrice.toFixed(
-                  2
-                )} € (popust "${d.discountName}", redovna cijena ${d.base.toFixed(
-                  2
-                )} €)`
-            )
-            .join("; ");
-          priceLine += `\nPrimijenjeni popusti: ${details}.`;
-        }
-      } else if (lang === "en") {
-        priceLine = `Total price (${partsText}): ${totalText}.`;
-        if (anyDiscount) {
-          const details = discountNotes
-            .map(
-              (d) =>
-                `${d.name}: ${d.quantity}x at ${d.unitPrice.toFixed(
-                  2
-                )} € (discount "${d.discountName}", regular price ${d.base.toFixed(
-                  2
-                )} €)`
-            )
-            .join("; ");
-          priceLine += `\nApplied discounts: ${details}.`;
-        }
-      } else {
-        priceLine = `Gesamtpreis (${partsText}): ${totalText}.`;
-        if (anyDiscount) {
-          const details = discountNotes
-            .map(
-              (d) =>
-                `${d.name}: ${d.quantity}x für ${d.unitPrice.toFixed(
-                  2
-                )} € (Rabatt "${d.discountName}", Standardpreis ${d.base.toFixed(
-                  2
-                )} €)`
-            )
-            .join("; ");
-          priceLine += `\nAngewendete Rabatte: ${details}.`;
-        }
-      }
-
-      reply += `\n\n${priceLine}`;
-    }
-
-    // PASSWORD / ORDER META
-    let phoneToStore = (meta && meta.phone) || phoneCandidate || null;
-    let nameToStore = meta && meta.name ? meta.name : null;
-    let pickupTimeToStore =
-      meta && meta.pickupTime ? meta.pickupTime : null;
-
-    let isFinalized =
-      meta && typeof meta.isFinalOrder === "boolean"
-        ? meta.isFinalOrder
-        : false;
-
-    const orderAction = (meta && meta.orderAction) || "none";
-    const passwordAction = (meta && meta.passwordAction) || "none";
-
-    // NEW PASSWORD
-    if (
-      passwordAction === "set" &&
-      meta &&
-      meta.password &&
-      phoneToStore &&
-      !existingPasswordHash
-    ) {
-      await upsertCustomer(phoneToStore, meta.password, nameToStore);
-      const refreshed = await getCustomerByPhone(phoneToStore);
-      existingPasswordHash = refreshed?.password_hash || null;
-    }
-
-    // CONFIRM PASSWORD
-    if (
-      passwordAction === "confirm" &&
-      meta &&
-      meta.password &&
-      existingPasswordHash
-    ) {
-      try {
-        const ok = await bcrypt.compare(
-          meta.password,
-          existingPasswordHash
-        );
-        if (!ok) {
-          isFinalized = false;
-
-          let wrongPwMsg;
-          if (lang === "bhs") {
-            wrongPwMsg =
-              "Nažalost, password koji ste unijeli nije ispravan. Vaša narudžba nije konačno potvrđena. Molimo vas da kontaktirate pekaru (telefon ili lično) kako biste dobili novi password.";
-          } else if (lang === "en") {
-            wrongPwMsg =
-              "Unfortunately, the password you entered is not correct. Your order has not been finalized. Please contact the bakery (by phone or in person) to receive a new password.";
-          } else {
-            wrongPwMsg =
-              "Das angegebene Passwort stimmt leider nicht. Ihre Bestellung wurde nicht endgültig bestätigt. Bitte wenden Sie sich direkt an die Bäckerei (Telefon oder persönlich), um ein neues Passwort zu erhalten.";
-          }
-
-          reply += "\n\n" + wrongPwMsg;
-        }
-      } catch (e) {
-        console.error("Password compare error:", e);
-      }
-    }
-
-    // ORDER ACTION: cancel / modify – otkazuje zadnju finalnu
-    if (
-      supabase &&
-      phoneToStore &&
-      (orderAction === "cancel_last" ||
-        orderAction === "modify_last")
-    ) {
-      try {
-        const { data: lastOrders, error: lastErr } = await supabase
-          .from("orders")
-          .select("id, is_delivered, is_cancelled")
-          .eq("user_phone", phoneToStore)
-          .eq("is_finalized", true)
-          .order("created_at", { ascending: false })
-          .limit(1);
-
-        if (!lastErr && lastOrders && lastOrders.length > 0) {
-          const lastOrder = lastOrders[0];
-
-          if (!lastOrder.is_delivered) {
-            await supabase
-              .from("orders")
-              .update({
-                is_cancelled: true,
-              })
-              .eq("id", lastOrder.id);
-          }
-        }
-      } catch (e) {
-        console.error(
-          "Supabase update (cancel/modify) error:",
-          e
-        );
-      }
-    }
-
-    // UPIS U orders
-    if (supabase) {
-      try {
-        await supabase.from("orders").insert({
-          project_id: projectId,
-          user_message: message,
-          ai_reply: reply,
-          items: {
-            kaese: qty.kaese,
-            fleisch: qty.fleisch,
-            kartoffeln: qty.kartoffeln,
-          },
-          total: total || null,
-          user_phone: phoneToStore,
-          user_name: nameToStore,
-          pickup_time: pickupTimeToStore,
-          is_finalized: isFinalized,
-          is_cancelled: orderAction === "cancel_last" ? true : false,
-          is_delivered: false,
-          order_action: orderAction,
-          client_ip,
-          user_agent,
-        });
-      } catch (dbErr) {
-        console.error("Supabase insert error:", dbErr);
-      }
-    }
-
-    return res.json({ reply, total: total || null });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ----------------------------
-//  widget.js – chat za iframe
-// ----------------------------
-
-app.get("/widget.js", (req, res) => {
-  const js = `
-(function(){
-  const script = document.currentScript;
-  const projectId = script.getAttribute("data-project") || "burek01";
-  const host = script.src.split("/widget.js")[0];
-
-  const urlParams = new URLSearchParams(window.location.search);
-  const langParam = urlParams.get("lang") || "hr";
-
-  const history = [];
-
-  const box = document.createElement("div");
-  box.style.cssText = "max-width:900px;margin:0 auto;border:1px solid #ddd;border-radius:10px;overflow:hidden;font-family:Arial";
-
-  box.innerHTML =
-    "<div style='padding:14px 16px;border-bottom:1px solid #eee;background:white'>" +
-    "<h2 style='margin:0;font-size:22px'>Chat</h2>" +
-    "<div id='opl-desc' style='margin-top:6px;color:#555;font-size:14px'></div>" +
-    "</div>" +
-    "<div id='opl-chat' style='height:60vh;overflow:auto;padding:12px;background:#fafafa'></div>" +
-    "<div style='display:flex;gap:8px;padding:12px;border-top:1px solid:#eee;background:white'>" +
-    "<textarea id='opl-in' placeholder='Poruka...' style='flex:1;min-height:44px;border:1px solid:#ddd;border-radius:8px;padding:10px'></textarea>" +
-    "<button id='opl-send' type='button' style='padding:10px 16px;border:1px solid:#222;background:#222;color:white;border-radius:8px;cursor:pointer'>Pošalji</button>" +
-    "</div>";
-
-  script.parentNode.insertBefore(box, script);
-
-  const chat = document.getElementById("opl-chat");
-  const input = document.getElementById("opl-in");
-  const sendBtn = document.getElementById("opl-send");
-  const desc = document.getElementById("opl-desc");
-
-  function add(role, text){
-    const row = document.createElement("div");
-    row.style.margin = "8px 0";
-    row.style.display = "flex";
-    row.style.justifyContent = role === "user" ? "flex-end" : "flex-start";
-
-    const bubble = document.createElement("div");
-    bubble.style.maxWidth = "75%";
-    bubble.style.padding = "10px 12px";
-    bubble.style.borderRadius = "12px";
-    bubble.style.whiteSpace = "pre-wrap";
-    bubble.style.border = "1px solid " + (role === "user" ? "#d6e3ff" : "#eee");
-    bubble.style.background = role === "user" ? "#e8f0ff" : "white";
-    bubble.textContent = text;
-
-    row.appendChild(bubble);
-    chat.appendChild(row);
-    chat.scrollTop = chat.scrollHeight;
   }
 
-  fetch(host + "/api/projects/" + projectId + "/config?lang=" + langParam)
-    .then(r => r.json())
-    .then(cfg => {
-      const welcome = cfg.welcome;
-      desc.textContent = cfg.description;
-      add("assistant", welcome);
-      history.push({ role:"assistant", content: welcome });
-    });
+  return { total, lineItems };
+}
 
-  async function send(){
-    const text = input.value.trim();
-    if (!text) return;
-    input.value = "";
-
-    add("user", text);
-    history.push({ role:"user", content: text });
-
-    const row = document.createElement("div");
-    row.style.margin = "8px 0";
-    row.innerHTML = "<div style='padding:10px 12px;border-radius:12px;border:1px solid:#eee;background:white'>…</div>";
-    chat.appendChild(row);
-    chat.scrollTop = chat.scrollHeight;
-    const bubble = row.querySelector("div");
-
-    try {
-      const r = await fetch(host + "/api/chat", {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ projectId, message: text, history })
-      });
-
-      const j = await r.json();
-      bubble.textContent = j.reply;
-      history.push({ role:"assistant", content: j.reply });
-
-    } catch (err) {
-      bubble.textContent = "Greška pri slanju.";
-    }
-  }
-
-  sendBtn.onclick = send;
-
-  input.addEventListener("keydown", e => {
-    if (e.key === "Enter" && !e.shiftKey){
-      e.preventDefault();
-      send();
-    }
+// Spremi finalnu narudžbu u orders
+async function saveFinalOrder({
+  projectId,
+  lang,
+  phone,
+  name,
+  pickupTime,
+  items,
+  customerCategories,
+  originalOrderId,
+  req
+}) {
+  const products = await getProductsForProject(projectId);
+  const { total, lineItems } = computeOrderTotals({
+    items,
+    products,
+    customerCategories
   });
-})();
-`;
-  res.setHeader("Content-Type", "application/javascript");
-  res.send(js);
+
+  const { ip: client_ip, ua: user_agent } = getRequestMeta(req);
+
+  const payload = {
+    project_id: projectId,
+    lang,
+    phone,
+    name: name || null,
+    pickup_time: pickupTime || null,
+    status: "confirmed",
+    original_order_id: originalOrderId || null,
+    items: {
+      raw: items,
+      lines: lineItems
+    },
+    total,
+    currency: "EUR",
+    client_ip,
+    user_agent
+  };
+
+  const { data, error } = await supabase
+    .from("orders")
+    .insert(payload)
+    .select()
+    .maybeSingle();
+
+  if (error) {
+    console.error("Supabase insert order error:", error);
+    return null;
+  }
+
+  console.log("NOVA POTVRĐENA NARUDŽBA:", {
+    id: data.id,
+    phone: data.phone,
+    name: data.name,
+    pickup_time: data.pickup_time,
+    total: data.total,
+    items: data.items?.raw || null
+  });
+
+  return data;
+}
+
+// Oznaci staru narudžbu kao otkazanu ako je korigirana
+async function cancelOriginalOrderIfAny(originalOrderId) {
+  if (!originalOrderId) return;
+
+  const { error } = await supabase
+    .from("orders")
+    .update({ status: "canceled" })
+    .eq("id", originalOrderId);
+
+  if (error) {
+    console.error(
+      "Supabase error cancelOriginalOrderIfAny for",
+      originalOrderId,
+      error
+    );
+  }
+}
+
+// ----- API: PROJECT CONFIG (widget) --------------------------------------
+
+// npr. /api/projects/burek01/config?lang=hr
+app.get("/api/projects/:id/config", (req, res) => {
+  const lang = (req.query.lang || "hr").toLowerCase();
+  const p = PROJECTS[req.params.id] || PROJECTS["burek01"];
+  const texts = getConfigTexts(lang);
+
+  res.json({
+    projectId: p.id,
+    title: p.title[lang] || p.title.hr,
+    description: texts.description,
+    welcome: texts.welcome,
+    pricing: p.pricing
+  });
 });
 
-// ----------------------------
-//  DEMO PAGE
-// ----------------------------
+// ----- DEMO STRANICA ZA CHAT ---------------------------------------------
 
+// Jednostavna demo stranica koja učitava widget.js
 app.get("/demo", (req, res) => {
-  const { lang = "hr", project = "burek01" } = req.query;
-  res.send(`
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Oplend AI Demo</title>
-  </head>
-  <body>
-    <h3>Oplend AI Demo</h3>
-    <p>Trenutni URL chata: https://oplend-ai.onrender.com/demo?lang=${lang}</p>
-    <script src="/widget.js" data-project="${project}"></script>
-  </body>
-</html>
-  `);
+  const lang = (req.query.lang || "hr").toLowerCase();
+
+  const html = `<!doctype html>
+<html lang="${lang}">
+<head>
+  <meta charset="utf-8" />
+  <title>Oplend AI – Burek chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f4f4f5;
+    }
+    .demo-container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+    h1 {
+      font-size: 1.5rem;
+      margin-bottom: 8px;
+    }
+    .chat-box {
+      margin-top: 12px;
+      border-radius: 12px;
+      background: #fff;
+      padding: 12px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+    }
+  </style>
+</head>
+<body>
+  <div class="demo-container">
+    <h1>Burek – chat</h1>
+    <div id="chat-root" class="chat-box"></div>
+  </div>
+  <script src="/widget.js"></script>
+  <script>
+    window.OplendWidget && window.OplendWidget.init({
+      elementId: "chat-root",
+      projectId: "burek01",
+      lang: "${lang}"
+    });
+  </script>
+</body>
+</html>`;
+
+  res.send(html);
 });
 
-// ----------------------------
-//  ADMIN HTML EKRANI
-// ----------------------------
+// ----- API: CHAT ----------------------------------------------------------
 
-app.get("/admin", adminAuthMiddleware, (req, res) => {
-  res.sendFile(new URL("./public/admin.html", import.meta.url).pathname);
-});
-
-app.get("/admin/products", adminAuthMiddleware, (req, res) => {
-  res.sendFile(
-    new URL("./public/products-admin.html", import.meta.url).pathname
-  );
-});
-
-app.get("/admin/customers", adminAuthMiddleware, (req, res) => {
-  res.sendFile(
-    new URL("./public/customers-admin.html", import.meta.url).pathname
-  );
-});
-
-// ----------------------------
-//  ADMIN – ORDERS API
-// ----------------------------
-
-app.get("/api/admin/orders", adminAuthMiddleware, async (req, res) => {
+// Frontend (widget.js) šalje: { projectId, lang, messages, state }
+// Vraćamo: { messages, state }
+app.post("/api/chat", async (req, res) => {
   try {
-    if (!supabase) {
-      return res.status(500).json({ error: "Supabase not configured" });
+    const { projectId = "burek01", lang = "hr", messages, state } = req.body;
+    const project = PROJECTS[projectId] || PROJECTS["burek01"];
+
+    const sysLang = lang === "de" ? "German" : lang === "en" ? "English" : "Croatian";
+
+    const systemPrompt = `
+Ti si ljubazan chatbot za naručivanje bureka u pekari.
+Govorite isključivo na jeziku korisnika (${sysLang}).
+Vodi korisnika kroz:
+- odabir vrste bureka (sir/cheese/kaese, meso/meat/fleisch, krumpir/potato/kartoffeln)
+- količine
+- ime (opcionalno)
+- broj telefona (obavezno)
+- PIN lozinku za izmjene narudžbe
+- vrijeme preuzimanja
+- potvrdu narudžbe
+
+STATE objekt opisuje trenutno stanje narudžbe:
+
+state = {
+  stage: string,              // "start" | "collect_items" | "ask_name" | "ask_phone" | "ask_pin" | "ask_pickup" | "confirm" | "finalized" | "cancel"
+  projectId: string,
+  lang: string,
+  phone: string | null,
+  pin: string | null,
+  name: string | null,
+  pickupTime: string | null,
+  items: { kaese?: number, fleisch?: number, kartoffeln?: number },
+  originalOrderId?: number | null
+}
+
+U SVAKOM odgovoru:
+1) ažuriraj i vrati novi JSON state u posebnom bloku:
+<state>{...}</state>
+2) u ostatku teksta normalno razgovaraj.
+
+Kada je narudžba potpuno gotova i korisnik JE POTVRDIO, postavi:
+- state.stage = "finalized"
+- popuni state.phone, state.pin, state.pickupTime i state.items (količine)
+- ako je ovo izmjena postojeće narudžbe, postavi state.originalOrderId na postojeći ID koji ti je poslan u prethodnom stanju.
+
+NE izmišljaj ID narudžbe – backend će to dodijeliti.
+`;
+
+    const openaiMessages = [
+      { role: "system", content: systemPrompt },
+      ...(messages || [])
+    ];
+
+    const completion = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+      messages: openaiMessages,
+      temperature: 0.4
+    });
+
+    const assistantMessage = completion.choices[0].message;
+    const assistantText = assistantMessage.content || "";
+
+    // Pokušaj izdvojiti <state>...</state> JSON
+    let newState = state || {};
+    const stateMatch = assistantText.match(/<state>([\s\S]*?)<\/state>/i);
+    if (stateMatch) {
+      try {
+        const jsonText = stateMatch[1];
+        newState = JSON.parse(jsonText);
+      } catch (e) {
+        console.error("Parse state error:", e);
+      }
     }
 
-    const {
-      project = "burek01",
-      status = "all",
-      date = "all",
-    } = req.query;
+    // Ako je stage == finalized -> spremi order
+    if (newState && newState.stage === "finalized") {
+      const projectIdUsed = newState.projectId || projectId;
+      const langUsed = newState.lang || lang;
+
+      const phone = newState.phone;
+      const pin = newState.pin;
+      const name = newState.name || null;
+      const pickupTime = newState.pickupTime || null;
+      const items = newState.items || {};
+      const originalOrderId = newState.originalOrderId || null;
+
+      // Upsert kupca
+      let customerCategories = [];
+      if (phone && pin) {
+        const cust = await upsertCustomer({
+          projectId: projectIdUsed,
+          phone,
+          pin,
+          name,
+          categories: newState.categories || []
+        });
+        if (cust && Array.isArray(cust.categories)) {
+          customerCategories = cust.categories;
+        }
+      }
+
+      const order = await saveFinalOrder({
+        projectId: projectIdUsed,
+        lang: langUsed,
+        phone,
+        name,
+        pickupTime,
+        items,
+        customerCategories,
+        originalOrderId,
+        req
+      });
+
+      if (order && originalOrderId) {
+        await cancelOriginalOrderIfAny(originalOrderId);
+      }
+
+      console.log("NEW FINAL ORDER:", {
+        projectId: projectIdUsed,
+        phone,
+        name,
+        pickupTime,
+        items,
+        total: order?.total || null,
+        orderId: order?.id || null
+      });
+    }
+
+    res.json({
+      messages: [...(messages || []), assistantMessage],
+      state: newState
+    });
+  } catch (err) {
+    console.error("Error /api/chat:", err);
+    res.status(500).json({ error: "Chat error" });
+  }
+});
+
+// ----- ADMIN: HTML STRANICE ----------------------------------------------
+
+// /admin – narudžbe
+app.get("/admin", adminAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "admin.html"));
+});
+
+// /admin/products – proizvodi & popusti
+app.get("/admin/products", adminAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "products-admin.html"));
+});
+
+// /admin/customers – kupci & kategorije
+app.get("/admin/customers", adminAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "customers-admin.html"));
+});
+
+// ----- ADMIN: ORDERS API --------------------------------------------------
+
+// GET /api/admin/orders?project=burek01&status=open|all&date=today|all
+app.get("/api/admin/orders", adminAuth, async (req, res) => {
+  try {
+    const projectId = req.query.project || "burek01";
+    const status = req.query.status || "open";
+    const date = req.query.date || "today";
 
     let query = supabase
       .from("orders")
-      .select(
-        `
-        id,
-        project_id,
-        created_at,
-        user_name,
-        user_phone,
-        pickup_time,
-        items,
-        total,
-        is_finalized,
-        is_cancelled,
-        is_delivered,
-        order_action
-      `
-      )
-      .eq("project_id", project);
+      .select("*")
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: false });
+
+    if (status === "open") {
+      query = query.in("status", ["confirmed"]);
+    }
 
     if (date === "today") {
       const today = new Date();
-      const start = new Date(
-        today.getFullYear(),
-        today.getMonth(),
-        today.getDate()
-      );
-      const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-
-      query = query
-        .gte("created_at", start.toISOString())
-        .lt("created_at", end.toISOString());
+      today.setHours(0, 0, 0, 0);
+      const isoStart = today.toISOString();
+      const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+      const isoEnd = tomorrow.toISOString();
+      query = query.gte("created_at", isoStart).lt("created_at", isoEnd);
     }
 
-    let { data, error } = await query.order("created_at", {
-      ascending: false,
-    });
+    const { data, error } = await query;
 
     if (error) {
-      console.error("Supabase admin select error:", error);
+      console.error("Supabase get orders error:", error);
       return res.status(500).json({ error: "DB error" });
     }
 
-    // izbacimo nacrte (drafts)
-    data = (data || []).filter(
-      (o) => o.is_finalized || o.is_cancelled || o.is_delivered
-    );
-
-    if (status === "open") {
-      data = data.filter(
-        (o) =>
-          o.is_finalized && !o.is_cancelled && !o.is_delivered
-      );
-    } else if (status === "delivered") {
-      data = data.filter((o) => o.is_delivered);
-    } else if (status === "cancelled") {
-      data = data.filter((o) => o.is_cancelled);
-    }
-
-    res.json({ orders: data || [] });
+    res.json(data || []);
   } catch (err) {
-    console.error("Admin orders error:", err);
+    console.error("Error /api/admin/orders:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-app.post(
-  "/api/admin/orders/:id/delivered",
-  adminAuthMiddleware,
-  async (req, res) => {
-    try {
-      if (!supabase) {
-        return res
-          .status(500)
-          .json({ error: "Supabase not configured" });
-      }
-
-      const { id } = req.params;
-      const { error } = await supabase
-        .from("orders")
-        .update({ is_delivered: true })
-        .eq("id", id);
-
-      if (error) {
-        console.error("Supabase update delivered error:", error);
-        return res.status(500).json({ error: "DB error" });
-      }
-
-      res.json({ ok: true });
-    } catch (err) {
-      console.error("Admin delivered error:", err);
-      res.status(500).json({ error: "Server error" });
-    }
-  }
-);
-
-// ----------------------------
-//  ADMIN – PRODUCTS API
-// ----------------------------
-
-app.get("/api/admin/products", adminAuthMiddleware, async (req, res) => {
+// POST /api/admin/orders/:id/delivered
+app.post("/api/admin/orders/:id/delivered", adminAuth, async (req, res) => {
   try {
-    if (!supabase) {
-      return res.status(500).json({ error: "Supabase not configured" });
+    const id = Number(req.params.id);
+    const { data, error } = await supabase
+      .from("orders")
+      .update({ status: "delivered" })
+      .eq("id", id)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      console.error("Supabase delivered error:", error);
+      return res.status(500).json({ error: "DB error" });
     }
 
-    const { projectId = "burek01" } = req.query;
+    res.json(data);
+  } catch (err) {
+    console.error("Error /api/admin/orders/:id/delivered:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// POST /api/admin/orders/:id/canceled
+app.post("/api/admin/orders/:id/canceled", adminAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { data, error } = await supabase
+      .from("orders")
+      .update({ status: "canceled" })
+      .eq("id", id)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      console.error("Supabase cancel order error:", error);
+      return res.status(500).json({ error: "DB error" });
+    }
+
+    res.json(data);
+  } catch (err) {
+    console.error("Error /api/admin/orders/:id/canceled:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ----- ADMIN: PRODUCTS API -----------------------------------------------
+
+// GET /api/admin/products?project=burek01
+app.get("/api/admin/products", adminAuth, async (req, res) => {
+  try {
+    const projectId = req.query.project || "burek01";
+    const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .eq("project_id", projectId)
+      .order("id", { ascending: true });
+
+    if (error) {
+      console.error("Supabase get products error:", error);
+      return res.status(500).json({ error: "DB error" });
+    }
+
+    res.json(data || []);
+  } catch (err) {
+    console.error("Error /api/admin/products:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// POST /api/admin/products
+app.post("/api/admin/products", adminAuth, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const payload = {
+      project_id: body.project_id || "burek01",
+      sku: body.sku,
+      name_hr: body.name_hr,
+      name_de: body.name_de,
+      name_en: body.name_en,
+      base_price: body.base_price,
+      currency: body.currency || "EUR",
+      is_active: body.is_active ?? true,
+      discount_type: body.discount_type || null,
+      discount_value: body.discount_value ?? null,
+      discount_name: body.discount_name || null,
+      is_discount_active: body.is_discount_active ?? false,
+      allowed_categories: body.allowed_categories || []
+    };
 
     const { data, error } = await supabase
       .from("products")
-      .select(
-        `
-        id,
-        project_id,
-        name,
-        code,
-        base_price,
-        discount_name,
-        discount_price,
-        discount_start,
-        discount_end,
-        discount_allowed_categories,
-        is_active,
-        created_at,
-        updated_at
-      `
-      )
-      .eq("project_id", projectId)
-      .order("name", { ascending: true });
+      .insert(payload)
+      .select()
+      .maybeSingle();
 
     if (error) {
-      console.error("Supabase products select error:", error);
+      console.error("Supabase insert product error:", error);
       return res.status(500).json({ error: "DB error" });
     }
 
-    res.json({ products: data });
+    res.json(data);
   } catch (err) {
-    console.error("Admin products error:", err);
+    console.error("Error POST /api/admin/products:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-app.post(
-  "/api/admin/products/:id",
-  adminAuthMiddleware,
-  async (req, res) => {
-    try {
-      if (!supabase) {
-        return res.status(500).json({ error: "Supabase not configured" });
-      }
-
-      const { id } = req.params;
-      const {
-        name,
-        code,
-        base_price,
-        discount_name,
-        discount_price,
-        discount_start,
-        discount_end,
-        discount_allowed_categories,
-        is_active,
-      } = req.body;
-
-      const update = {};
-      if (name != null) update.name = name;
-      if (code != null) update.code = code;
-      if (base_price != null)
-        update.base_price = Number(base_price);
-      if (discount_name !== undefined)
-        update.discount_name = discount_name || null;
-      if (discount_price !== undefined)
-        update.discount_price =
-          discount_price === "" || discount_price == null
-            ? null
-            : Number(discount_price);
-      if (discount_start !== undefined)
-        update.discount_start =
-          discount_start === "" ? null : discount_start;
-      if (discount_end !== undefined)
-        update.discount_end =
-          discount_end === "" ? null : discount_end;
-
-      if (discount_allowed_categories !== undefined) {
-        if (
-          typeof discount_allowed_categories === "string" &&
-          discount_allowed_categories.trim() !== ""
-        ) {
-          update.discount_allowed_categories =
-            discount_allowed_categories
-              .split(",")
-              .map((s) => s.trim())
-              .filter(Boolean);
-        } else {
-          update.discount_allowed_categories = null;
-        }
-      }
-
-      if (is_active !== undefined) {
-        update.is_active = !!is_active;
-      }
-
-      update.updated_at = new Date().toISOString();
-
-      const { error } = await supabase
-        .from("products")
-        .update(update)
-        .eq("id", id);
-
-      if (error) {
-        console.error("Supabase update product error:", error);
-        return res.status(500).json({ error: "DB error" });
-      }
-
-      res.json({ ok: true });
-    } catch (err) {
-      console.error("Admin update product error:", err);
-      res.status(500).json({ error: "Server error" });
-    }
-  }
-);
-
-// ----------------------------
-//  ADMIN – CUSTOMERS API
-// ----------------------------
-
-app.get("/api/admin/customers", adminAuthMiddleware, async (req, res) => {
+// PUT /api/admin/products/:id
+app.put("/api/admin/products/:id", adminAuth, async (req, res) => {
   try {
-    if (!supabase) {
-      return res.status(500).json({ error: "Supabase not configured" });
+    const id = Number(req.params.id);
+    const body = req.body || {};
+
+    const payload = {
+      sku: body.sku,
+      name_hr: body.name_hr,
+      name_de: body.name_de,
+      name_en: body.name_en,
+      base_price: body.base_price,
+      currency: body.currency,
+      is_active: body.is_active,
+      discount_type: body.discount_type,
+      discount_value: body.discount_value,
+      discount_name: body.discount_name,
+      is_discount_active: body.is_discount_active,
+      allowed_categories: body.allowed_categories
+    };
+
+    const { data, error } = await supabase
+      .from("products")
+      .update(payload)
+      .eq("id", id)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      console.error("Supabase update product error:", error);
+      return res.status(500).json({ error: "DB error" });
     }
+
+    res.json(data);
+  } catch (err) {
+    console.error("Error PUT /api/admin/products/:id:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// DELETE /api/admin/products/:id
+app.delete("/api/admin/products/:id", adminAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { error } = await supabase.from("products").delete().eq("id", id);
+
+    if (error) {
+      console.error("Supabase delete product error:", error);
+      return res.status(500).json({ error: "DB error" });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error DELETE /api/admin/products/:id:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ----- ADMIN: CUSTOMERS API ----------------------------------------------
+
+// GET /api/admin/customers?project=burek01
+app.get("/api/admin/customers", adminAuth, async (req, res) => {
+  try {
+    const projectId = req.query.project || "burek01";
 
     const { data, error } = await supabase
       .from("customers")
-      .select("phone, name, categories, created_at")
+      .select("*")
+      .eq("project_id", projectId)
       .order("created_at", { ascending: false });
 
     if (error) {
-      console.error("Supabase customers select error:", error);
+      console.error("Supabase get customers error:", error);
       return res.status(500).json({ error: "DB error" });
     }
 
-    res.json({ customers: data || [] });
+    res.json(data || []);
   } catch (err) {
-    console.error("Admin customers error:", err);
+    console.error("Error GET /api/admin/customers:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-app.post(
-  "/api/admin/customers/:phone",
-  adminAuthMiddleware,
-  async (req, res) => {
-    try {
-      if (!supabase) {
-        return res.status(500).json({ error: "Supabase not configured" });
-      }
+// POST /api/admin/customers
+app.post("/api/admin/customers", adminAuth, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const payload = {
+      project_id: body.project_id || "burek01",
+      phone: body.phone,
+      pin: body.pin,
+      name: body.name || null,
+      categories: body.categories || []
+    };
 
-      const phoneParam = req.params.phone;
-      const { name, categories } = req.body;
+    const { data, error } = await supabase
+      .from("customers")
+      .insert(payload)
+      .select()
+      .maybeSingle();
 
-      const update = {};
-      if (name !== undefined) update.name = name;
-
-      if (categories !== undefined) {
-        if (typeof categories === "string" && categories.trim() !== "") {
-          update.categories = categories
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean);
-        } else {
-          update.categories = [];
-        }
-      }
-
-      const { error } = await supabase
-        .from("customers")
-        .update(update)
-        .eq("phone", phoneParam);
-
-      if (error) {
-        console.error("Supabase update customer error:", error);
-        return res.status(500).json({ error: "DB error" });
-      }
-
-      res.json({ ok: true });
-    } catch (err) {
-      console.error("Admin update customer error:", err);
-      res.status(500).json({ error: "Server error" });
+    if (error) {
+      console.error("Supabase insert customer error:", error);
+      return res.status(500).json({ error: "DB error" });
     }
+
+    res.json(data);
+  } catch (err) {
+    console.error("Error POST /api/admin/customers:", err);
+    res.status(500).json({ error: "Server error" });
   }
-);
-
-// ----------------------------
-//  ROOT
-// ----------------------------
-
-app.get("/", (req, res) => {
-  res.send("Oplend AI – running");
 });
 
-// ----------------------------
-//  START SERVER
-// ----------------------------
+// PUT /api/admin/customers/:id
+app.put("/api/admin/customers/:id", adminAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const body = req.body || {};
 
-const port = process.env.PORT || 3000;
-app.listen(port, () => console.log("Server running on port " + port));
+    const payload = {
+      phone: body.phone,
+      pin: body.pin,
+      name: body.name,
+      categories: body.categories
+    };
+
+    const { data, error } = await supabase
+      .from("customers")
+      .update(payload)
+      .eq("id", id)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      console.error("Supabase update customer error:", error);
+      return res.status(500).json({ error: "DB error" });
+    }
+
+    res.json(data);
+  } catch (err) {
+    console.error("Error PUT /api/admin/customers/:id:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// DELETE /api/admin/customers/:id
+app.delete("/api/admin/customers/:id", adminAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { error } = await supabase.from("customers").delete().eq("id", id);
+
+    if (error) {
+      console.error("Supabase delete customer error:", error);
+      return res.status(500).json({ error: "DB error" });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error DELETE /api/admin/customers/:id:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// -------------------------------------------------------------------------
+
+app.get("/", (req, res) => {
+  res.send("Oplend AI Burek bot – backend radi 🚀");
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
