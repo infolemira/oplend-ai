@@ -1,12 +1,4 @@
-// server.js – Oplend AI (burek) – s products + popusti + customers admin
-// - Chat narudžbe (HR/DE/EN, META, Supabase, password logika)
-// - Lozinke i kategorije u customers
-// - Proizvodi i popusti u products
-// - Admin narudžbe: /admin + /api/admin/orders
-// - Admin proizvodi: /admin/products + /api/admin/products*
-// - Admin kupci: /admin/customers + /api/admin/customers*
-// - Logiranje client_ip + user_agent
-// - Rate limit na /api/chat
+// server.js – Oplend AI (burek) s products, customers i admin sučeljem
 
 import express from "express";
 import cors from "cors";
@@ -52,7 +44,8 @@ const PROJECTS = {
   burek01: {
     lang: "multi",
     title: "Burek – Online narudžba",
-    pricing: { kaese: 5, fleisch: 5, kartoffeln: 5 }, // fallback ako nema products
+    // fallback cijene ako nema products u bazi
+    pricing: { kaese: 5, fleisch: 5, kartoffeln: 5 },
     systemPrompt: `
 Du bist ein Bestell-Assistent für eine Bäckerei. Du bearbeitest ausschließlich Bestellungen für:
 1) Burek mit Käse
@@ -91,6 +84,7 @@ STANDARDNI FLOW NOVE NARUDŽBE
 
 2) KADA KLIJENT POTVRDI DA JE TO SVE
 → Pitaj za vrijeme preuzimanja.
+
 3) KADA NAPIŠE VRIJEME
 → Pitaj za ime i broj telefona.
 
@@ -257,7 +251,6 @@ async function getProductsForProject(projectId) {
   }
 }
 
-// cijena po komadu za ovog kupca
 function computeUnitPrice(product, customerCategories = []) {
   const now = new Date();
   let price = Number(product.base_price);
@@ -548,6 +541,7 @@ app.post("/api/chat", async (req, res) => {
     let totalPieces = 0;
     const partsLabel = [];
     const discountNotes = [];
+
     for (const code of codes) {
       const q = qty[code] || 0;
       if (!q) continue;
@@ -802,7 +796,7 @@ app.get("/widget.js", (req, res) => {
     "</div>" +
     "<div id='opl-chat' style='height:60vh;overflow:auto;padding:12px;background:#fafafa'></div>" +
     "<div style='display:flex;gap:8px;padding:12px;border-top:1px solid:#eee;background:white'>" +
-    "<textarea id='opl-in' placeholder='Poruka...' style='flex:1;min-height:44px;border:1px solid #ddd;border-radius:8px;padding:10px'></textarea>" +
+    "<textarea id='opl-in' placeholder='Poruka...' style='flex:1;min-height:44px;border:1px solid:#ddd;border-radius:8px;padding:10px'></textarea>" +
     "<button id='opl-send' type='button' style='padding:10px 16px;border:1px solid:#222;background:#222;color:white;border-radius:8px;cursor:pointer'>Pošalji</button>" +
     "</div>";
 
@@ -1164,7 +1158,7 @@ app.post(
       res.status(500).json({ error: "Server error" });
     }
   }
-});
+);
 
 // ----------------------------
 //  ADMIN – CUSTOMERS API
