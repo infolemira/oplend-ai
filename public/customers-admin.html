@@ -1,1 +1,35 @@
+<!doctype html>
+<html lang="hr">
+<head>
+  <meta charset="utf-8" />
+  <title>Oplend – Customers admin</title>
+  <link rel="stylesheet" href="/admin.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Customers admin</h1>
 
+    <div class="top-links">
+      <a href="/admin">↩ Narudžbe</a>
+      <a href="/admin/products">📦 Proizvodi</a>
+    </div>
+
+    <table id="customers-table">
+      <thead>
+        <tr>
+          <th>Telefon</th>
+          <th>Ime</th>
+          <th>Kategorije (npr. student,vip)</th>
+          <th>Registriran</th>
+          <th>Spremi</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <div id="status" class="status"></div>
+  </div>
+
+  <script src="/customers-admin.js"></script>
+</body>
+</html>
