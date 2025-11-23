@@ -1,9 +1,11 @@
-// server.js – Oplend AI
-// widget.js mobile fix + multi-language
-// "je li to sve" flow + Supabase + hashirani password
-// + zaštita broja telefona + otkazivanje / izmjena prethodne narudžbe
-// + backend jedini provjerava password
-// + cijena bureka = 5 € za sve vrste
+// server.js – Oplend AI (proširena verzija)
+// - widget.js + multi-language
+// - flow za narudžbu + Supabase + hashirani password
+// - zaštita broja telefona + otkazivanje / izmjena
+// - backend jedini provjerava password
+// - cijena bureka = 5 €
+// - admin dashboard (/admin + /api/admin/orders)
+// - rate limit + logiranje IP + user-agent
 
 import express from "express";
 import cors from "cors";
@@ -19,7 +21,11 @@ const app = express();
 app.use(express.json());
 app.use(cors({ origin: "*", methods: "*", allowedHeaders: "*" }));
 
-const { OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
+const {
+  OPENAI_API_KEY,
+  SUPABASE_URL,
+  SUPABASE_SERVICE_KEY,
+} = process.env;
 
 const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
@@ -30,11 +36,15 @@ const supabase =
     ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
     : null;
 
+// ----------------------------
+//  PROJEKTI (više pekara)
+// ----------------------------
+
 const PROJECTS = {
   burek01: {
+    id: "burek01",
     lang: "multi",
-    title: "Burek – Online-Bestellung",
-    // SVE VRSTE 5 €
+    title: "Burek – Online narudžba",
     pricing: { kaese: 5, fleisch: 5, kartoffeln: 5 },
     systemPrompt: `
 Du bist ein Bestell-Assistent für eine Bäckerei. Du bearbeitest ausschließlich Bestellungen für:
@@ -62,7 +72,7 @@ IZBJEGAVAJ PONAVLJANJE ISTIH PITANJA
   - Ako je korisnik već napisao broj telefona: ne pitaj opet "koji je vaš broj telefona?".
   - Ako je korisnik već napisao ime: ne pitaj ponovno "kako se zovete?", osim ako kaže da je prethodni podatak kriv.
   - Ako je korisnik već jednom unio password u ovom chatu i backend ga je prihvatio
-    (vidjet ćeš po tome što je narudžba potvrđena), NE traži ponovo password za istu narudžbu.
+    (vidićeš po tome što je narudžba potvrđena), NE traži ponovo password za istu narudžbu.
 - Kada korisnik ispravlja narudžbu u NOVOM chatu:
   - Jednom tražiš broj telefona i password, nakon toga ih VIŠE NE PONAVLJAŠ u tom razgovoru.
 
@@ -110,7 +120,7 @@ NOVI KLIJENT (broj telefona NEMA password u bazi):
 - Nakon što dobiješ ime + broj telefona:
   - Objasni da treba postaviti password za buduće narudžbe.
   - Pitaj: "Molim vas unesite password koji želite koristiti ubuduće."
-  - Kad ga korisnik unese → u META stavi: passwordAction = "set", password = "..."
+  - Kad je korisnik unese → u META stavi: passwordAction = "set", password = "..."
   - NE traži password ponovo na kraju iste narudžbe.
 
 POSTOJEĆI KLIJENT (broj telefona VEĆ IMA password u bazi):
@@ -184,7 +194,7 @@ OTKAZIVANJE:
 
 IZMJENA:
 - Ako želi promijeniti zadnju potvrđenu narudžbu:
-  - Jasno pitaj novu kombinaciju (vrste + količine, eventualno novo vrijeme).
+  - Jasno pitaj novu željenu kombinaciju (vrste + količine, eventualno novo vrijeme).
   - Kada nova kombinacija bude jasna i password je unijet:
     - U META:
       - orderAction = "modify_last"
@@ -222,6 +232,15 @@ BEISPIEL:
 - Ovu liniju NE objašnjavaš korisniku. Ona je samo za sistem.
     `,
   },
+
+  // Primjer za drugi projekt (druga pekara) – za kasnije:
+  // burek02: {
+  //   id: "burek02",
+  //   lang: "multi",
+  //   title: "Pekara XYZ – Burek",
+  //   pricing: { kaese: 6, fleisch: 6, kartoffeln: 6 },
+  //   systemPrompt: "...",
+  // },
 };
 
 // ----------------------------
@@ -246,8 +265,7 @@ function parseQuantities(text) {
 function detectLang(text) {
   const t = (text || "").toLowerCase();
   if (/[šđćčž]/.test(t)) return "bhs";
-  if (t.includes(" der ") || t.includes(" die ") || t.includes(" das "))
-    return "de";
+  if (t.includes(" der ") || t.includes(" die ") || t.includes(" das ")) return "de";
   if (t.includes("thanks") || t.includes("thank")) return "en";
   return "auto";
 }
@@ -258,27 +276,63 @@ function detectPhone(text) {
   return m[1].replace(/[^\d+]/g, "");
 }
 
+function getClientIp(req) {
+  const xfwd = req.headers["x-forwarded-for"];
+  if (typeof xfwd === "string" && xfwd.length > 0) {
+    return xfwd.split(",")[0].trim();
+  }
+  return req.ip || req.connection?.remoteAddress || "unknown";
+}
+
 // ----------------------------
-//  CONFIG ENDPOINT (HR / DE / EN preko ?lang=)
+//  RATE LIMIT (anti-spam)
+// ----------------------------
+
+const RATE_LIMIT_WINDOW_MS = 60_000; // 60 sekundi
+const RATE_LIMIT_MAX_REQUESTS = 20;  // max 20 / minutu po IP
+const rateLimitStore = new Map();
+
+function checkRateLimit(req, res) {
+  const ip = getClientIp(req);
+  const now = Date.now();
+
+  const arr = rateLimitStore.get(ip) || [];
+  const recent = arr.filter((ts) => now - ts < RATE_LIMIT_WINDOW_MS);
+  recent.push(now);
+  rateLimitStore.set(ip, recent);
+
+  if (recent.length > RATE_LIMIT_MAX_REQUESTS) {
+    res.status(429).json({
+      error: "Previše zahtjeva s ove IP adrese. Pokušajte ponovo za minutu.",
+    });
+    return false;
+  }
+  return true;
+}
+
+// ----------------------------
+//  CONFIG ENDPOINT
 // ----------------------------
 
 app.get("/api/projects/:id/config", (req, res) => {
   const p = PROJECTS[req.params.id] || PROJECTS["burek01"];
   const lang = (req.query.lang || "hr").toLowerCase();
 
-  let title, description, welcome;
+  let title = p.title;
+  let description;
+  let welcome;
 
   if (lang === "de") {
-    title = "Burek – Online-Bestellung";
+    title = "Chat-Bestellung";
     description = "Bestellen Sie Burek: Käse | Fleisch | Kartoffeln";
     welcome = "Willkommen! Bitte geben Sie Sorte und Anzahl der Bureks ein.";
   } else if (lang === "en") {
-    title = "Burek – online ordering";
+    title = "Chat order";
     description = "Order burek: cheese | meat | potato";
     welcome = "Welcome! Please enter the type of burek and number of pieces.";
   } else {
-    // HR default
-    title = "Burek – online narudžba";
+    // hr / bhs default
+    title = "Chat narudžba";
     description = "Naručite burek: sir | meso | krumpir";
     welcome = "Dobrodošli! Molimo upišite vrstu bureka i broj komada.";
   }
@@ -292,12 +346,66 @@ app.get("/api/projects/:id/config", (req, res) => {
 });
 
 // ----------------------------
-//  CHAT ENDPOINT (poštuje ?lang=)
+//  NOTIFICATION HOOK (za pekaru)
+// ----------------------------
+
+// Trenutno samo ispis u konzolu.
+// Kasnije ovdje možeš dodati pravi e-mail / SMS (npr. preko nodemailer / Twilio).
+async function notifyBakeryOnFinalOrder(orderRow) {
+  try {
+    console.log("NOVA POTVRĐENA NARUDŽBA:", {
+      id: orderRow?.id,
+      phone: orderRow?.user_phone,
+      name: orderRow?.user_name,
+      pickup_time: orderRow?.pickup_time,
+      total: orderRow?.total,
+      items: orderRow?.items,
+    });
+
+    // PRIMJER (pseudo-kod) za e-mail:
+    /*
+    import nodemailer from "nodemailer";
+
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT || 587),
+      secure: false,
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+
+    await transporter.sendMail({
+      from: '"Burek Bot" <no-reply@tvoja-domena.com>',
+      to: "tvoj-mail@domena.com",
+      subject: "Nova narudžba bureka",
+      text: `Nova narudžba: ...`,
+    });
+    */
+  } catch (err) {
+    console.error("Greška u notifyBakeryOnFinalOrder:", err);
+  }
+}
+
+// ----------------------------
+//  CHAT ENDPOINT
 // ----------------------------
 
 app.post("/api/chat", async (req, res) => {
   try {
-    const { projectId = "burek01", message = "", history = [] } = req.body;
+    if (!checkRateLimit(req, res)) return;
+
+    const clientIp = getClientIp(req);
+    const userAgent = req.headers["user-agent"] || null;
+
+    const {
+      projectId = "burek01",
+      message = "",
+      history = [],
+      lang: forcedLang, // opcionalno, ako ikad poželiš slati iz frontenda
+    } = req.body;
+
     const p = PROJECTS[projectId] || PROJECTS["burek01"];
 
     const safeHistory = Array.isArray(history)
@@ -307,23 +415,8 @@ app.post("/api/chat", async (req, res) => {
     const lastUser =
       safeHistory.filter((x) => x.role === "user").pop()?.content || message;
 
-    // prisilni jezik iz query parametra (hr/de/en)
-    const forcedLangRaw = (req.query.lang || "").toLowerCase();
-    let forcedLang = null;
-    if (["hr", "de", "en"].includes(forcedLangRaw)) {
-      forcedLang = forcedLangRaw;
-    }
-
-    let lang;
-    if (forcedLang === "de") {
-      lang = "de";
-    } else if (forcedLang === "en") {
-      lang = "en";
-    } else if (forcedLang === "hr") {
-      lang = "bhs"; // naš prompt koristi "bhs" za bosanski/hrvatski/srpski
-    } else {
-      lang = detectLang(lastUser);
-    }
+    const langDetected = detectLang(lastUser);
+    const lang = forcedLang || langDetected;
 
     const languageInstruction =
       lang === "de"
@@ -339,9 +432,7 @@ app.post("/api/chat", async (req, res) => {
       safeHistory
         .filter((m) => m.role === "user")
         .map((m) => m.content)
-        .join("\n") +
-      "\n" +
-      message;
+        .join("\n") + "\n" + message;
 
     const phoneCandidate = detectPhone(allUserTextForPhone);
     let existingPasswordHash = null;
@@ -414,9 +505,7 @@ app.post("/api/chat", async (req, res) => {
       safeHistory
         .filter((m) => m.role === "user")
         .map((m) => m.content)
-        .join("\n") +
-      "\n" +
-      message;
+        .join("\n") + "\n" + message;
 
     const qty = parseQuantities(allUserTextForQty);
     const prices = p.pricing;
@@ -436,14 +525,13 @@ app.post("/api/chat", async (req, res) => {
 
       reply += `
 
-Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
+Ukupna cijena (${parts.join(", ")}): ${total.toFixed(2)} € (plaćanje pri preuzimanju).`;
     }
 
     // --- PASSWORD / ORDER META NA BACKENDU ---
     let phoneToStore = (meta && meta.phone) || phoneCandidate || null;
     let nameToStore = meta && meta.name ? meta.name : null;
-    let pickupTimeToStore =
-      meta && meta.pickupTime ? meta.pickupTime : null;
+    let pickupTimeToStore = meta && meta.pickupTime ? meta.pickupTime : null;
 
     let isFinalized =
       meta && typeof meta.isFinalOrder === "boolean"
@@ -478,10 +566,7 @@ Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
       existingPasswordHash
     ) {
       try {
-        const ok = await bcrypt.compare(
-          meta.password,
-          existingPasswordHash
-        );
+        const ok = await bcrypt.compare(meta.password, existingPasswordHash);
         if (!ok) {
           isFinalized = false;
 
@@ -511,7 +596,6 @@ Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
       (orderAction === "cancel_last" || orderAction === "modify_last")
     ) {
       try {
-        // nađi POSLJEDNJU finaliziranu narudžbu za ovaj broj
         const { data: lastOrders, error: lastErr } = await supabase
           .from("orders")
           .select("id, is_delivered, is_cancelled")
@@ -523,7 +607,6 @@ Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
         if (!lastErr && lastOrders && lastOrders.length > 0) {
           const lastOrder = lastOrders[0];
 
-          // ako je već isporučena, ne diramo je
           if (!lastOrder.is_delivered) {
             await supabase
               .from("orders")
@@ -539,29 +622,48 @@ Gesamtpreis (${parts.join(", ")}): ${total.toFixed(2)} €.`;
     }
 
     // --- SUPABASE LOGGING (nova "akcija" / narudžba) ---
+    let insertedRow = null;
+
     if (supabase) {
       try {
-        await supabase.from("orders").insert({
-          project_id: projectId,
-          user_message: message,
-          ai_reply: reply,
-          items: {
-            kaese: qty.kaese,
-            fleisch: qty.fleisch,
-            kartoffeln: qty.kartoffeln,
-          },
-          total: total || null,
-          user_phone: phoneToStore,
-          user_name: nameToStore,
-          pickup_time: pickupTimeToStore,
-          is_finalized: isFinalized,
-          is_cancelled: orderAction === "cancel_last" ? true : false,
-          is_delivered: false,
-          password: passwordHashToStore,
-        });
+        const { data, error } = await supabase
+          .from("orders")
+          .insert({
+            project_id: projectId,
+            user_message: message,
+            ai_reply: reply,
+            items: {
+              kaese: qty.kaese,
+              fleisch: qty.fleisch,
+              kartoffeln: qty.kartoffeln,
+            },
+            total: total || null,
+            user_phone: phoneToStore,
+            user_name: nameToStore,
+            pickup_time: pickupTimeToStore,
+            is_finalized: isFinalized,
+            is_cancelled: orderAction === "cancel_last" ? true : false,
+            is_delivered: false,
+            password: passwordHashToStore,
+            client_ip: clientIp,
+            user_agent: userAgent,
+          })
+          .select("*")
+          .single();
+
+        if (!error) {
+          insertedRow = data;
+        } else {
+          console.error("Supabase insert error:", error);
+        }
       } catch (dbErr) {
         console.error("Supabase insert error:", dbErr);
       }
+    }
+
+    // Ako je narudžba finalizirana → notifikacija pekari
+    if (insertedRow && insertedRow.is_finalized && !insertedRow.is_cancelled) {
+      notifyBakeryOnFinalOrder(insertedRow);
     }
 
     return res.json({ reply, total: total || null });
@@ -580,31 +682,8 @@ app.get("/widget.js", (req, res) => {
 (function(){
   const script = document.currentScript;
   const projectId = script.getAttribute("data-project") || "burek01";
-  const host = script.src.split("/widget.js")[0];
   const lang = (script.getAttribute("data-lang") || "hr").toLowerCase();
-
-  const texts = {
-    hr: {
-      header: "Chat narudžba",
-      placeholder: "Poruka...",
-      send: "Pošalji",
-      error: "Došlo je do greške pri slanju."
-    },
-    de: {
-      header: "Chat-Bestellung",
-      placeholder: "Nachricht...",
-      send: "Senden",
-      error: "Fehler beim Senden."
-    },
-    en: {
-      header: "Chat order",
-      placeholder: "Message...",
-      send: "Send",
-      error: "Error while sending."
-    }
-  };
-
-  const ui = texts[lang] || texts.hr;
+  const host = script.src.split("/widget.js")[0];
 
   const history = [];
 
@@ -613,13 +692,13 @@ app.get("/widget.js", (req, res) => {
 
   box.innerHTML =
     "<div style='padding:14px 16px;border-bottom:1px solid #eee;background:white'>" +
-    "<h2 style='margin:0;font-size:22px'>" + ui.header + "</h2>" +
+    "<h2 id='opl-title' style='margin:0;font-size:22px'>Chat</h2>" +
     "<div id='opl-desc' style='margin-top:6px;color:#555;font-size:14px'></div>" +
     "</div>" +
     "<div id='opl-chat' style='height:60vh;overflow:auto;padding:12px;background:#fafafa'></div>" +
-    "<div style='display:flex;gap:8px;padding:12px;border-top:1px solid:#eee;background:white'>" +
-    "<textarea id='opl-in' placeholder='" + ui.placeholder + "' style='flex:1;min-height:44px;border:1px solid:#ddd;border-radius:8px;padding:10px'></textarea>" +
-    "<button id='opl-send' type='button' style='padding:10px 16px;border:1px solid:#222;background:#222;color:white;border-radius:8px;cursor:pointer'>" + ui.send + "</button>" +
+    "<div style='display:flex;gap:8px;padding:12px;border-top:1px solid #eee;background:white'>" +
+    "<textarea id='opl-in' placeholder='Poruka...' style='flex:1;min-height:44px;border:1px solid #ddd;border-radius:8px;padding:10px'></textarea>" +
+    "<button id='opl-send' type='button' style='padding:10px 16px;border:1px solid #222;background:#222;color:white;border-radius:8px;cursor:pointer'>Pošalji</button>" +
     "</div>";
 
   script.parentNode.insertBefore(box, script);
@@ -628,6 +707,7 @@ app.get("/widget.js", (req, res) => {
   const input = document.getElementById("opl-in");
   const sendBtn = document.getElementById("opl-send");
   const desc = document.getElementById("opl-desc");
+  const titleEl = document.getElementById("opl-title");
 
   function add(role, text){
     const row = document.createElement("div");
@@ -650,11 +730,12 @@ app.get("/widget.js", (req, res) => {
   }
 
   // Load config (sa lang parametrom)
-  fetch(host + "/api/projects/" + projectId + "/config?lang=" + lang)
-    .then(function(r){ return r.json(); })
-    .then(function(cfg){
+  fetch(host + "/api/projects/" + projectId + "/config?lang=" + encodeURIComponent(lang))
+    .then(r => r.json())
+    .then(cfg => {
       const welcome = cfg.welcome;
       desc.textContent = cfg.description;
+      titleEl.textContent = cfg.title || "Chat";
       add("assistant", welcome);
       history.push({ role:"assistant", content: welcome });
     });
@@ -675,18 +756,22 @@ app.get("/widget.js", (req, res) => {
     const bubble = row.querySelector("div");
 
     try {
-      const r = await fetch(host + "/api/chat?lang=" + lang, {
+      const r = await fetch(host + "/api/chat", {
         method: "POST",
         headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ projectId, message: text, history })
+        body: JSON.stringify({ projectId, message: text, history, lang })
       });
 
       const j = await r.json();
+      if (j.error) {
+        bubble.textContent = j.error;
+        return;
+      }
       bubble.textContent = j.reply;
       history.push({ role:"assistant", content: j.reply });
 
     } catch (err) {
-      bubble.textContent = ui.error;
+      bubble.textContent = "Greška pri slanju poruke.";
     }
   }
 
@@ -705,21 +790,360 @@ app.get("/widget.js", (req, res) => {
 });
 
 // ----------------------------
-//  DEMO PAGE (HR / DE / EN preko ?lang=)
+//  DEMO PAGE (iframe)
 // ----------------------------
 
 app.get("/demo", (req, res) => {
-  const langRaw = (req.query.lang || "hr").toLowerCase();
-  const lang = ["hr", "de", "en"].includes(langRaw) ? langRaw : "hr";
+  const lang = (req.query.lang || "hr").toLowerCase();
+  const project = (req.query.project || "burek01").toString();
 
   res.send(`
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Burek chat</title>
+    <title>Oplend AI Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
   </head>
-  <body style="margin:0;padding:0;">
-    <script src="/widget.js" data-project="burek01" data-lang="${lang}"></script>
+  <body style="margin:0;padding:10px;font-family:system-ui,sans-serif;">
+    <div id="app"></div>
+    <script src="/widget.js" data-project="${project}" data-lang="${lang}"></script>
+  </body>
+</html>
+  `);
+});
+
+// ----------------------------
+//  ADMIN API – pregled narudžbi
+// ----------------------------
+
+// GET /api/admin/orders?status=open|all&date=today|all&project=burek01
+app.get("/api/admin/orders", async (req, res) => {
+  if (!supabase) {
+    return res.status(500).json({ error: "Supabase nije konfiguriran." });
+  }
+
+  try {
+    const {
+      status = "open",
+      date = "all",
+      project = "burek01",
+    } = req.query;
+
+    let query = supabase
+      .from("orders")
+      .select("*")
+      .eq("project_id", project)
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    if (status === "open") {
+      query = query
+        .eq("is_finalized", true)
+        .eq("is_cancelled", false)
+        .eq("is_delivered", false);
+    }
+
+    if (date === "today") {
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+
+      query = query
+        .gte("created_at", start.toISOString())
+        .lt("created_at", end.toISOString());
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error("Admin orders error:", error);
+      return res.status(500).json({ error: "Greška pri čitanju narudžbi." });
+    }
+
+    res.json({ orders: data || [] });
+  } catch (err) {
+    console.error("Admin orders exception:", err);
+    res.status(500).json({ error: "Interna greška servera." });
+  }
+});
+
+// POST /api/admin/orders/:id/delivered
+app.post("/api/admin/orders/:id/delivered", async (req, res) => {
+  if (!supabase) {
+    return res.status(500).json({ error: "Supabase nije konfiguriran." });
+  }
+
+  const id = req.params.id;
+  try {
+    const { data, error } = await supabase
+      .from("orders")
+      .update({ is_delivered: true })
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) {
+      console.error("Mark delivered error:", error);
+      return res.status(500).json({ error: "Greška pri označavanju isporuke." });
+    }
+
+    res.json({ ok: true, order: data });
+  } catch (err) {
+    console.error("Mark delivered exception:", err);
+    res.status(500).json({ error: "Interna greška servera." });
+  }
+});
+
+// ----------------------------
+//  ADMIN DASHBOARD PAGE (/admin)
+// ----------------------------
+
+app.get("/admin", (req, res) => {
+  // ⚠️ Trenutno bez autentikacije – kasnije dodati zaštitu (IP whitelist, basic auth, itd.)
+  res.send(`
+<!DOCTYPE html>
+<html lang="hr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Burek – Admin narudžbe</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 0;
+        padding: 20px;
+        background: #f4f4f5;
+      }
+      h1 {
+        margin-top: 0;
+      }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 15px;
+        align-items: center;
+      }
+      select, button {
+        padding: 6px 10px;
+        border-radius: 6px;
+        border: 1px solid #d4d4d8;
+        font-size: 14px;
+      }
+      button.primary {
+        background: #16a34a;
+        color: white;
+        border-color: #16a34a;
+        cursor: pointer;
+      }
+      button.primary:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: white;
+        border-radius: 10px;
+        overflow: hidden;
+      }
+      th, td {
+        padding: 8px 10px;
+        border-bottom: 1px solid #e4e4e7;
+        font-size: 13px;
+      }
+      th {
+        background: #f4f4f5;
+        text-align: left;
+      }
+      tr:last-child td {
+        border-bottom: none;
+      }
+      .badge {
+        display: inline-block;
+        padding: 2px 6px;
+        border-radius: 999px;
+        font-size: 11px;
+      }
+      .badge-open {
+        background: #f97316;
+        color: white;
+      }
+      .badge-done {
+        background: #22c55e;
+        color: white;
+      }
+      .badge-cancel {
+        background: #ef4444;
+        color: white;
+      }
+      .nowrap {
+        white-space: nowrap;
+      }
+      .small {
+        font-size: 11px;
+        color: #71717a;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Burek – admin narudžbe</h1>
+    <div class="toolbar">
+      <label>Projekt:
+        <select id="project-select">
+          <option value="burek01">burek01</option>
+        </select>
+      </label>
+      <label>Status:
+        <select id="status-select">
+          <option value="open">Samo otvorene (potvrđene, neisporučene)</option>
+          <option value="all">Sve narudžbe</option>
+        </select>
+      </label>
+      <label>Datum:
+        <select id="date-select">
+          <option value="today">Samo današnje</option>
+          <option value="all">Svi datumi</option>
+        </select>
+      </label>
+      <button id="refresh-btn" class="primary">Osvježi</button>
+      <span id="info" class="small"></span>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Vrijeme</th>
+          <th>Ime / telefon</th>
+          <th>Artikli</th>
+          <th>Ukupno</th>
+          <th>Status</th>
+          <th>Akcija</th>
+        </tr>
+      </thead>
+      <tbody id="orders-body">
+        <tr><td colspan="6">Učitavanje...</td></tr>
+      </tbody>
+    </table>
+
+    <script>
+      const tbody = document.getElementById('orders-body');
+      const projectSel = document.getElementById('project-select');
+      const statusSel = document.getElementById('status-select');
+      const dateSel = document.getElementById('date-select');
+      const refreshBtn = document.getElementById('refresh-btn');
+      const infoEl = document.getElementById('info');
+
+      async function loadOrders() {
+        tbody.innerHTML = "<tr><td colspan='6'>Učitavanje...</td></tr>";
+        infoEl.textContent = "";
+        refreshBtn.disabled = true;
+
+        const params = new URLSearchParams({
+          project: projectSel.value,
+          status: statusSel.value,
+          date: dateSel.value,
+        });
+
+        try {
+          const res = await fetch("/api/admin/orders?" + params.toString());
+          const data = await res.json();
+          if (data.error) {
+            tbody.innerHTML = "<tr><td colspan='6'>" + data.error + "</td></tr>";
+            refreshBtn.disabled = false;
+            return;
+          }
+
+          const orders = data.orders || [];
+          infoEl.textContent = "Prikazano " + orders.length + " narudžbi.";
+
+          if (!orders.length) {
+            tbody.innerHTML = "<tr><td colspan='6'>Nema narudžbi za zadane filtere.</td></tr>";
+            refreshBtn.disabled = false;
+            return;
+          }
+
+          tbody.innerHTML = "";
+          for (const o of orders) {
+            const tr = document.createElement("tr");
+
+            const created = new Date(o.created_at);
+            const createdStr = created.toLocaleString();
+
+            const pickup = o.pickup_time ? String(o.pickup_time) : "-";
+
+            const items = o.items || {};
+            const parts = [];
+            if (items.kaese) parts.push(items.kaese + "x sir");
+            if (items.fleisch) parts.push(items.fleisch + "x meso");
+            if (items.kartoffeln) parts.push(items.kartoffeln + "x krumpir");
+
+            let statusHtml = "";
+            if (o.is_cancelled) {
+              statusHtml = "<span class='badge badge-cancel'>Otkazano</span>";
+            } else if (o.is_delivered) {
+              statusHtml = "<span class='badge badge-done'>Isporučeno</span>";
+            } else if (o.is_finalized) {
+              statusHtml = "<span class='badge badge-open'>Potvrđeno</span>";
+            } else {
+              statusHtml = "<span class='badge'>Nacrt / u tijeku</span>";
+            }
+
+            const btnDisabled = o.is_delivered || o.is_cancelled || !o.is_finalized;
+
+            tr.innerHTML =
+              "<td class='nowrap'>" + createdStr + "<br><span class='small'>Preuzimanje: " + pickup + "</span></td>" +
+              "<td>" + (o.user_name || "-") + "<br><span class='small'>" + (o.user_phone || "") + "</span></td>" +
+              "<td>" + (parts.join(", ") || "-") + "</td>" +
+              "<td>" + (o.total != null ? (o.total.toFixed ? o.total.toFixed(2) : o.total) + " €" : "-") + "</td>" +
+              "<td>" + statusHtml + "</td>" +
+              "<td><button data-id='" + o.id + "' " + (btnDisabled ? "disabled" : "") + ">Označi isporučeno</button></td>";
+
+            tbody.appendChild(tr);
+          }
+
+        } catch (err) {
+          tbody.innerHTML = "<tr><td colspan='6'>Greška pri dohvaćanju narudžbi.</td></tr>";
+          console.error(err);
+        } finally {
+          refreshBtn.disabled = false;
+        }
+      }
+
+      tbody.addEventListener("click", async function(e){
+        const btn = e.target.closest("button[data-id]");
+        if (!btn) return;
+        const id = btn.getAttribute("data-id");
+        btn.disabled = true;
+        btn.textContent = "Spremam...";
+
+        try {
+          const res = await fetch("/api/admin/orders/" + id + "/delivered", {
+            method: "POST",
+          });
+          const data = await res.json();
+          if (data.error) {
+            alert(data.error);
+            btn.disabled = false;
+            btn.textContent = "Označi isporučeno";
+            return;
+          }
+          await loadOrders();
+        } catch (err) {
+          console.error(err);
+          alert("Greška pri spremanju.");
+          btn.disabled = false;
+          btn.textContent = "Označi isporučeno";
+        }
+      });
+
+      refreshBtn.addEventListener("click", loadOrders);
+      statusSel.addEventListener("change", loadOrders);
+      dateSel.addEventListener("change", loadOrders);
+      projectSel.addEventListener("change", loadOrders);
+
+      loadOrders();
+    </script>
   </body>
 </html>
   `);
