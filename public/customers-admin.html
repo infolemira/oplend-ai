@@ -1,134 +1,192 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="hr">
-<head>
-  <meta charset="utf-8" />
-  <title>Burek – kupci i kategorije</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    body {
-      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-      margin: 0;
-      padding: 0;
-      background: #f4f4f5;
-    }
-    header {
-      background: #10b981;
-      color: #fff;
-      padding: 12px 16px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    header h1 {
-      margin: 0;
-      font-size: 1.2rem;
-    }
-    nav a {
-      color: #fff;
-      margin-left: 12px;
-      text-decoration: none;
-      font-size: 0.9rem;
-    }
-    .container {
-      max-width: 1100px;
-      margin: 16px auto;
-      padding: 0 12px 24px;
-    }
-    .top-bar {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      margin-bottom: 12px;
-      flex-wrap: wrap;
-    }
-    select, input[type="text"] {
-      padding: 4px 8px;
-      font-size: 0.9rem;
-    }
-    button {
-      padding: 6px 10px;
-      border-radius: 6px;
-      border: 1px solid #d4d4d8;
-      background: #e4e4e7;
-      cursor: pointer;
-      font-size: 0.9rem;
-    }
-    button.primary {
-      background: #22c55e;
-      border-color: #16a34a;
-      color: #fff;
-    }
-    button.danger {
-      background: #ef4444;
-      border-color: #b91c1c;
-      color: #fff;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      background: #fff;
-      border-radius: 8px;
-      overflow: hidden;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-      font-size: 0.85rem;
-    }
-    th, td {
-      padding: 8px 10px;
-      border-bottom: 1px solid #e4e4e7;
-      vertical-align: top;
-    }
-    th {
-      background: #f4f4f5;
-      text-align: left;
-      white-space: nowrap;
-    }
-    tr:last-child td {
-      border-bottom: none;
-    }
-    .small-input {
-      width: 110px;
-    }
-    .wide-input {
-      width: 160px;
-    }
-  </style>
-</head>
-<body>
-  <header>
-    <h1>Burek – kupci i kategorije</h1>
-    <nav>
-      <a href="/admin">Narudžbe</a>
-      <a href="/admin/products">Proizvodi &amp; popusti</a>
-      <a href="/admin/customers">Kupci &amp; kategorije</a>
-    </nav>
-  </header>
-
-  <div class="container">
-    <div class="top-bar">
-      <span><strong>Projekt:</strong></span>
-      <select id="project-select">
-        <option value="burek01">burek01</option>
-      </select>
-      <button id="btn-add" class="primary">Dodaj kupca</button>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Burek – kupci i kategorije</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 0;
+        padding: 0;
+        background: #f4f4f5;
+      }
+      .page {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 16px;
+      }
+      .card {
+        background: white;
+        border-radius: 12px;
+        padding: 16px;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+        margin-bottom: 16px;
+      }
+      .nav {
+        margin-bottom: 10px;
+      }
+      .nav a {
+        margin-right: 10px;
+        text-decoration: none;
+        color: #2563eb;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+      }
+      th,
+      td {
+        border-bottom: 1px solid #e4e4e7;
+        padding: 6px 8px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #f4f4f5;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        border-radius: 8px;
+        border: 1px solid #d4d4d8;
+        padding: 4px 6px;
+        font-size: 0.85rem;
+      }
+      button {
+        border-radius: 8px;
+        border: none;
+        padding: 6px 10px;
+        cursor: pointer;
+        font-size: 0.85rem;
+      }
+      .btn-primary {
+        background: #f97316;
+        color: white;
+      }
+      .btn-secondary {
+        background: #e4e4e7;
+        color: #111827;
+      }
+      .small {
+        font-size: 0.78rem;
+        color: #6b7280;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="card">
+        <div class="nav">
+          <strong>Admin:</strong>
+          <a href="/admin">Narudžbe</a>
+          <a href="/admin/products">Proizvodi & popusti</a>
+          <a href="/admin/customers">Kupci & kategorije</a>
+        </div>
+        <h1>Kupci & kategorije</h1>
+        <p class="small">
+          Pregled telefona, PIN-ova i pripadajućih kategorija (npr. student,
+          dostava, VIP...).
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Telefon</th>
+              <th>PIN</th>
+              <th>Ime</th>
+              <th>Kategorije</th>
+              <th>Spremi</th>
+            </tr>
+          </thead>
+          <tbody id="customers-body"></tbody>
+        </table>
+        <button id="add-customer" class="btn-secondary" style="margin-top: 8px">
+          + Dodaj novog kupca
+        </button>
+      </div>
     </div>
 
-    <table id="customers-table">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Telefon</th>
-          <th>PIN</th>
-          <th>Ime</th>
-          <th>Kategorije (npr. student,radnik)</th>
-          <th>Akcije</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr><td colspan="6">Učitavanje...</td></tr>
-      </tbody>
-    </table>
-  </div>
+    <script>
+      const tbody = document.getElementById("customers-body");
+      const addBtn = document.getElementById("add-customer");
 
-  <script src="/customers-admin.js"></script>
-</body>
+      function renderRow(c) {
+        const tr = document.createElement("tr");
+        tr.dataset.id = c.id || "";
+        tr.innerHTML = `
+          <td><input data-field="phone" value="${c.phone || ""}"></td>
+          <td><input data-field="pin" value="${c.pin || ""}"></td>
+          <td><input data-field="name" value="${c.name || ""}"></td>
+          <td>
+            <input data-field="categories" placeholder="npr. student,fast_delivery" value="${
+              (c.categories || []).join(", ")
+            }">
+            <div class="small">CSV lista (student, vip, zaposlenik...)</div>
+          </td>
+          <td><button class="btn-primary" data-act="save">Spremi</button></td>
+        `;
+        return tr;
+      }
+
+      async function loadCustomers() {
+        tbody.innerHTML = `<tr><td colspan="5">Učitavanje...</td></tr>`;
+        const resp = await fetch("/api/admin/customers?project=burek01");
+        const data = await resp.json();
+        const customers = data.customers || [];
+        tbody.innerHTML = "";
+        for (const c of customers) {
+          tbody.appendChild(renderRow(c));
+        }
+      }
+
+      tbody.addEventListener("click", async (e) => {
+        const btn = e.target.closest("button");
+        if (!btn) return;
+        if (btn.dataset.act !== "save") return;
+        const tr = btn.closest("tr");
+        const id = tr.dataset.id ? Number(tr.dataset.id) : null;
+
+        const getVal = (field) =>
+          tr.querySelector(`[data-field="${field}"]`)?.value ?? "";
+
+        const payload = {
+          id,
+          projectId: "burek01",
+          phone: getVal("phone"),
+          pin: getVal("pin"),
+          name: getVal("name"),
+          categories: (getVal("categories") || "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        };
+
+        const resp = await fetch("/api/admin/customers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (!resp.ok) {
+          alert("Greška pri spremanju kupca.");
+          return;
+        }
+
+        await loadCustomers();
+      });
+
+      addBtn.addEventListener("click", () => {
+        const tr = renderRow({
+          phone: "",
+          pin: "",
+          name: "",
+          categories: []
+        });
+        tbody.appendChild(tr);
+      });
+
+      loadCustomers();
+    </script>
+  </body>
 </html>
