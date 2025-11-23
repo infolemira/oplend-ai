@@ -1,42 +1,150 @@
 <!doctype html>
 <html lang="hr">
 <head>
-<meta charset="utf-8" />
-<title>Oplend – Products admin</title>
-<link rel="stylesheet" href="/admin.css">
+  <meta charset="utf-8" />
+  <title>Burek – proizvodi i popusti</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f4f4f5;
+    }
+    header {
+      background: #0ea5e9;
+      color: #fff;
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.2rem;
+    }
+    nav a {
+      color: #fff;
+      margin-left: 12px;
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+    .container {
+      max-width: 1100px;
+      margin: 16px auto;
+      padding: 0 12px 24px;
+    }
+    .top-bar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    select, input[type="text"], input[type="number"] {
+      padding: 4px 8px;
+      font-size: 0.9rem;
+    }
+    button {
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid #d4d4d8;
+      background: #e4e4e7;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    button.primary {
+      background: #22c55e;
+      border-color: #16a34a;
+      color: #fff;
+    }
+    button.danger {
+      background: #ef4444;
+      border-color: #b91c1c;
+      color: #fff;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+      font-size: 0.85rem;
+    }
+    th, td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #e4e4e7;
+      vertical-align: top;
+    }
+    th {
+      background: #f4f4f5;
+      text-align: left;
+      white-space: nowrap;
+    }
+    tr:last-child td {
+      border-bottom: none;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+    }
+    .badge-active {
+      background: #dcfce7;
+      color: #166534;
+    }
+    .badge-inactive {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+    .small-input {
+      width: 70px;
+    }
+    .wide-input {
+      width: 140px;
+    }
+  </style>
 </head>
 <body>
+  <header>
+    <h1>Burek – proizvodi i popusti</h1>
+    <nav>
+      <a href="/admin">Narudžbe</a>
+      <a href="/admin/products">Proizvodi &amp; popusti</a>
+      <a href="/admin/customers">Kupci &amp; kategorije</a>
+    </nav>
+  </header>
 
-<div class="container">
+  <div class="container">
+    <div class="top-bar">
+      <span><strong>Projekt:</strong></span>
+      <select id="project-select">
+        <option value="burek01">burek01</option>
+      </select>
+      <button id="btn-add" class="primary">Dodaj novi proizvod</button>
+    </div>
 
-  <h1>Products admin</h1>
-
-  <div class="top-links">
-    <a href="/admin">↩ Narudžbe</a>
-    <a href="/admin/customers">👤 Kupci</a>
+    <table id="products-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>SKU</th>
+          <th>Ime (HR / DE / EN)</th>
+          <th>Cijena</th>
+          <th>Aktivan</th>
+          <th>Popust</th>
+          <th>Kategorije (allowed_categories)</th>
+          <th>Akcije</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="8">Učitavanje...</td></tr>
+      </tbody>
+    </table>
   </div>
 
-  <table id="products-table">
-    <thead>
-      <tr>
-        <th>Naziv</th>
-        <th>Kod</th>
-        <th>Cijena</th>
-        <th>Popust</th>
-        <th>Cijena s popustom</th>
-        <th>Vrijedi od</th>
-        <th>Vrijedi do</th>
-        <th>Kategorije</th>
-        <th>Spremi</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
-
-  <div id="status" class="status"></div>
-
-</div>
-
-<script src="/products-admin.js"></script>
+  <script src="/products-admin.js"></script>
 </body>
 </html>
