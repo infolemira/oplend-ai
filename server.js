@@ -6,7 +6,7 @@
 // - popusti ovisno o kategorijama kupaca
 // - admin za narudžbe, proizvode, kupce
 // - basic auth za admin
-// - rate-limit za /api/chat
+// - rate-limit za /api/chat (bez X-Forwarded-For errora)
 // --------------------------------------------------------
 
 import express from "express";
@@ -15,6 +15,8 @@ import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
 import rateLimit from "express-rate-limit";
 import basicAuth from "express-basic-auth";
+import path from "path";
+import { fileURLToPath } from "url";
 
 const PORT = process.env.PORT || 10000;
 
@@ -29,11 +31,8 @@ app.use(cors());
 app.use(express.json());
 
 // Static fajlovi za admin frontend (public folder)
-import path from "path";
-import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 app.use(express.static(path.join(__dirname, "public")));
 
 // Rate limit samo za /api/chat
@@ -41,7 +40,11 @@ const chatLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minuta
   max: 30,             // max 30 zahtjeva / min / IP
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  // 🔧 Gasi provjeru X-Forwarded-For da ne baca crveni ValidationError u Renderu
+  validate: {
+    xForwardedForHeader: false
+  }
 });
 
 app.use("/api/chat", chatLimiter);
@@ -356,7 +359,6 @@ app.get("/api/projects/:id/config", (req, res) => {
 
 // ----- DEMO STRANICA ZA CHAT ---------------------------------------------
 
-// Jednostavna demo stranica koja učitava widget.js
 app.get("/demo", (req, res) => {
   const lang = (req.query.lang || "hr").toLowerCase();
 
@@ -412,8 +414,6 @@ app.get("/demo", (req, res) => {
 
 // ----- API: CHAT ----------------------------------------------------------
 
-// Frontend (widget.js) šalje: { projectId, lang, messages, state }
-// Vraćamo: { messages, state }
 app.post("/api/chat", async (req, res) => {
   try {
     const { projectId = "burek01", lang = "hr", messages, state } = req.body;
@@ -474,7 +474,6 @@ NE izmišljaj ID narudžbe – backend će to dodijeliti.
     const assistantMessage = completion.choices[0].message;
     const assistantText = assistantMessage.content || "";
 
-    // Pokušaj izdvojiti <state>...</state> JSON
     let newState = state || {};
     const stateMatch = assistantText.match(/<state>([\s\S]*?)<\/state>/i);
     if (stateMatch) {
@@ -486,7 +485,6 @@ NE izmišljaj ID narudžbe – backend će to dodijeliti.
       }
     }
 
-    // Ako je stage == finalized -> spremi order
     if (newState && newState.stage === "finalized") {
       const projectIdUsed = newState.projectId || projectId;
       const langUsed = newState.lang || lang;
@@ -498,7 +496,6 @@ NE izmišljaj ID narudžbe – backend će to dodijeliti.
       const items = newState.items || {};
       const originalOrderId = newState.originalOrderId || null;
 
-      // Upsert kupca
       let customerCategories = [];
       if (phone && pin) {
         const cust = await upsertCustomer({
@@ -552,24 +549,20 @@ NE izmišljaj ID narudžbe – backend će to dodijeliti.
 
 // ----- ADMIN: HTML STRANICE ----------------------------------------------
 
-// /admin – narudžbe
 app.get("/admin", adminAuth, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "admin.html"));
 });
 
-// /admin/products – proizvodi & popusti
 app.get("/admin/products", adminAuth, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "products-admin.html"));
 });
 
-// /admin/customers – kupci & kategorije
 app.get("/admin/customers", adminAuth, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "customers-admin.html"));
 });
 
 // ----- ADMIN: ORDERS API --------------------------------------------------
 
-// GET /api/admin/orders?project=burek01&status=open|all&date=today|all
 app.get("/api/admin/orders", adminAuth, async (req, res) => {
   try {
     const projectId = req.query.project || "burek01";
@@ -609,7 +602,6 @@ app.get("/api/admin/orders", adminAuth, async (req, res) => {
   }
 });
 
-// POST /api/admin/orders/:id/delivered
 app.post("/api/admin/orders/:id/delivered", adminAuth, async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -632,7 +624,6 @@ app.post("/api/admin/orders/:id/delivered", adminAuth, async (req, res) => {
   }
 });
 
-// POST /api/admin/orders/:id/canceled
 app.post("/api/admin/orders/:id/canceled", adminAuth, async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -657,7 +648,6 @@ app.post("/api/admin/orders/:id/canceled", adminAuth, async (req, res) => {
 
 // ----- ADMIN: PRODUCTS API -----------------------------------------------
 
-// GET /api/admin/products?project=burek01
 app.get("/api/admin/products", adminAuth, async (req, res) => {
   try {
     const projectId = req.query.project || "burek01";
@@ -679,7 +669,6 @@ app.get("/api/admin/products", adminAuth, async (req, res) => {
   }
 });
 
-// POST /api/admin/products
 app.post("/api/admin/products", adminAuth, async (req, res) => {
   try {
     const body = req.body || {};
@@ -717,7 +706,6 @@ app.post("/api/admin/products", adminAuth, async (req, res) => {
   }
 });
 
-// PUT /api/admin/products/:id
 app.put("/api/admin/products/:id", adminAuth, async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -757,7 +745,6 @@ app.put("/api/admin/products/:id", adminAuth, async (req, res) => {
   }
 });
 
-// DELETE /api/admin/products/:id
 app.delete("/api/admin/products/:id", adminAuth, async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -777,7 +764,6 @@ app.delete("/api/admin/products/:id", adminAuth, async (req, res) => {
 
 // ----- ADMIN: CUSTOMERS API ----------------------------------------------
 
-// GET /api/admin/customers?project=burek01
 app.get("/api/admin/customers", adminAuth, async (req, res) => {
   try {
     const projectId = req.query.project || "burek01";
@@ -800,7 +786,6 @@ app.get("/api/admin/customers", adminAuth, async (req, res) => {
   }
 });
 
-// POST /api/admin/customers
 app.post("/api/admin/customers", adminAuth, async (req, res) => {
   try {
     const body = req.body || {};
@@ -830,7 +815,6 @@ app.post("/api/admin/customers", adminAuth, async (req, res) => {
   }
 });
 
-// PUT /api/admin/customers/:id
 app.put("/api/admin/customers/:id", adminAuth, async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -862,7 +846,6 @@ app.put("/api/admin/customers/:id", adminAuth, async (req, res) => {
   }
 });
 
-// DELETE /api/admin/customers/:id
 app.delete("/api/admin/customers/:id", adminAuth, async (req, res) => {
   try {
     const id = Number(req.params.id);
