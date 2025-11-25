@@ -249,6 +249,34 @@ const MAX_TOTAL_CHARS = 3000;     // max 3000 znakova u cijelom chatu
         async function sendMessage() {
           const text = inputEl.value.trim();
           if (!text) return;
+            // LIMIT JEDNE PORUKE (predugačka)
+  if (text.length > MAX_MESSAGE_CHARS) {
+    addMessage(
+      "assistant",
+      "Vaša poruka je predugačka. Maksimalna duljina je " +
+        MAX_MESSAGE_CHARS +
+        " znakova. Molim vas pošaljite kraću poruku."
+    );
+    return;
+  }
+
+  // LIMIT UKUPNIH ZNAKOVA U RAZGOVORU
+  if (totalChars + text.length > MAX_TOTAL_CHARS) {
+    addMessage(
+      "assistant",
+      "Dosegnuta je maksimalna duljina razgovora. " +
+        "Molim vas osvježite stranicu i započnite novu narudžbu."
+    );
+
+    inputEl.disabled = true;
+    sendBtn.disabled = true;
+
+    return;
+  }
+
+  // ako je sve u granicama → zbroji znakove
+  totalChars += text.length;
+
 
           // LIMIT 20 PORUKA — nakon toga chat je zaključan
           if (turnCount >= 20) {
