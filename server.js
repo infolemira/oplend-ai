@@ -525,18 +525,27 @@ JSON mora sadržavati:
 
     const reply = completion.choices[0].message.content || "";
 
-    // tražimo JSON_ORDER:
+      // tražimo JSON_ORDER:
     let finalOrder = null;
     const marker = "JSON_ORDER:";
     const idx = reply.indexOf(marker);
     if (idx !== -1) {
       const jsonPart = reply.substring(idx + marker.length).trim();
-      try {
-        finalOrder = JSON.parse(jsonPart);
-      } catch (e) {
-        console.error("JSON_ORDER parse error:", e, jsonPart);
+
+      // Izvuci SAMO prvi JSON objekt između { }
+      const match = jsonPart.match(/\{[\s\S]*\}/);
+      if (match) {
+        const jsonOnly = match[0];
+        try {
+          finalOrder = JSON.parse(jsonOnly);
+        } catch (e) {
+          console.error("JSON_ORDER parse error (inner JSON):", e, jsonOnly);
+        }
+      } else {
+        console.error("JSON_ORDER not found as JSON object:", jsonPart);
       }
     }
+
 
     if (finalOrder) {
       const {
