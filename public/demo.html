@@ -210,6 +210,10 @@
 
         let history = [];
         let turnCount = 0; // broj korisničkih poruka u ovom chatu
+        let totalChars = 0; // ukupna količina znakova u razgovoru
+const MAX_MESSAGE_CHARS = 300;    // max 300 znakova u jednoj poruci
+const MAX_TOTAL_CHARS = 3000;     // max 3000 znakova u cijelom chatu
+
 
         function renderTexts() {
           const t = texts[currentLang];
