@@ -688,27 +688,45 @@ app.get("/api/admin/products", async (req, res) => {
   }
 });
 
-
 app.post("/api/admin/products", async (req, res) => {
   try {
-    const projectId = req.body.projectId || "burek01";
-    const product = { ...req.body, project_id: projectId };
+    const projectId = req.body.projectId || req.tenant?.projectId || "burek01";
+    const storeId = req.tenant?.storeId || null;
+
+    const product = {
+      ...req.body,
+      project_id: projectId,
+      store_id: storeId
+    };
     delete product.projectId;
 
     let q = supabase.from("products");
     let result;
 
+    // UPDATE
     if (product.id) {
       const id = product.id;
       delete product.id;
-      const { data, error } = await q.update(product).eq("id", id).select().single();
+
+      const { data, error } = await q
+        .update(product)
+        .eq("id", id)
+        .select()
+        .single();
+
       if (error) {
         console.error("products update error:", error);
         return res.status(500).json({ error: "update_error" });
       }
       result = data;
+
+    // INSERT
     } else {
-      const { data, error } = await q.insert(product).select().single();
+      const { data, error } = await q
+        .insert(product)
+        .select()
+        .single();
+
       if (error) {
         console.error("products insert error:", error);
         return res.status(500).json({ error: "insert_error" });
@@ -717,11 +735,13 @@ app.post("/api/admin/products", async (req, res) => {
     }
 
     res.json({ product: result });
+
   } catch (err) {
     console.error("/api/admin/products POST exception:", err);
     res.status(500).json({ error: "exception" });
   }
 });
+
 
 /* ------------------------------------------------------------------ */
 /*  ADMIN: CUSTOMERS API                                               */
