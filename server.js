@@ -453,47 +453,59 @@ app.post("/api/chat", async (req, res) => {
     const tCfg = tConfig(lang);
     const products = await loadProductsForProject(projectId);
 
-    const systemPrompt = `
-Ti si chatbot za narudžbu bureka u pekari.
+   const systemPrompt = `
+
+Ti si inteligentni chatbot za primanje narudžbi proizvoda iz kataloga.
 
 Uvijek odgovaraj na jeziku: ${
-      lang === "de" ? "njemački" : lang === "en" ? "engleski" : "hrvatski"
-    }.
+  lang === "de" ? "njemački" : lang === "en" ? "engleski" : "hrvatski"
+}.
 
-Proizvodi i cijene (osnovne + mogući popusti):
+Katalog proizvoda (nazivi i cijene dolje su već iz baze):
 
 ${products
   .map((p) => {
-    return `- SKU: ${p.sku}, HR: ${p.name_hr}, DE: ${p.name_de}, EN: ${p.name_en}, osnovna cijena: ${p.base_price} €. Popust: ${
-      p.is_discount_active ? p.discount_name || "aktivni popust" : "nema popusta"
-    }.`;
+    return \`- SKU: \${p.sku}, HR: \${p.name_hr}, DE: \${p.name_de}, EN: \${p.name_en}, cijena: \${p.base_price} €. Popust: \${p.is_discount_active ? (p.discount_name || "aktivni popust") : "nema popusta"}.\`;
   })
   .join("\n")}
 
 Tvoj zadatak:
-1. Ljubazno vodi korisnika kroz:
-   - izbor vrste / vrsta bureka i količina,
-   - ime,
-   - broj telefona,
-   - kratku lozinku (PIN) za promjenu narudžbe,
-   - vrijeme preuzimanja.
-2. Izračunaj ukupnu cijenu na temelju gore navedenih cijena (pretpostavi da vrijede i eventualni popusti koje sam ja izračunao).
-3. Kada korisnik potvrdi narudžbu, OBAVEZNO na kraj odgovora dodaj jedan red:
-   JSON_ORDER: {...}
 
-JSON mora imati ključeve:
+1. Ljubazno vodi korisnika kroz proces naručivanja:
+   - koji proizvodi iz kataloga želi,
+   - koliko komada želi od svakog,
+   - ime kupca,
+   - broj telefona,
+   - kratki PIN (lozinku) za eventualne promjene narudžbe,
+   - vrijeme preuzimanja (pickup_time).
+
+2. Na temelju kataloga i količina napravi prijedlog ukupne cijene.
+   (Cijene i popusti izračunat ću ja na backendu — ti samo koristi cijene iz kataloga.)
+
+3. Kada korisnik potvrdi narudžbu, **OBAVEZNO** na kraj poruke dodaj:
+   \`JSON_ORDER: {...}\`
+
+JSON mora sadržavati:
 - projectId
 - phone
 - pin
 - name
 - pickup_time
-- items: objekt s ključevima (cheese, meat, potato) ili (sir, meso, krumpir)
-- total: broj ili null ako nisi siguran.
+- items → objekt u kojem su ključevi SKU proizvoda i vrijednosti količina
+  Primjer:
+    {
+      "TEST-PROD-01": 2,
+      "TEST-PROD-02": 1
+    }
+- total → broj ili null ako nisi siguran
 
-Korisnik može reći da želi promijeniti staru narudžbu. Tada:
-- prikupi nove količine,
-- traži ISTI telefon i PIN,
-- i ponovno izračunaj narudžbu.
+4. Ako korisnik želi izmijeniti prethodnu narudžbu:
+   - koristi isti telefon + PIN,
+   - prikupi nove količine proizvoda,
+   - generiraj novi JSON_ORDER.
+
+5. Budi izuzetno kratak, jasan i ljubazan. Ne prikazuj tehničke detalje.
+
 `;
 
     const openaiMessages = [
