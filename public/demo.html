@@ -247,6 +247,9 @@
 
           addMessage("user", text);
           history.push({ role: "user", content: text });
+          // zadrži samo zadnjih 20 poruka u povijesti
+          history = history.slice(-20);
+
           inputEl.value = "";
           inputEl.disabled = true;
           sendBtn.disabled = true;
