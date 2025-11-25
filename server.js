@@ -462,7 +462,11 @@ Katalog proizvoda (nazivi i cijene dolje su već iz baze):
 
 ${products
   .map((p) => {
-    return \`- SKU: \${p.sku}, HR: \${p.name_hr}, DE: \${p.name_de}, EN: \${p.name_en}, cijena: \${p.base_price} €. Popust: \${p.is_discount_active ? (p.discount_name || "aktivni popust") : "nema popusta"}.\`;
+    const popustText = p.is_discount_active
+      ? (p.discount_name || "aktivni popust")
+      : "nema popusta";
+
+    return `- SKU: ${p.sku}, HR: ${p.name_hr}, DE: ${p.name_de}, EN: ${p.name_en}, cijena: ${p.base_price} €. Popust: ${popustText}.`;
   })
   .join("\n")}
 
