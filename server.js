@@ -656,12 +656,25 @@ app.post("/api/admin/orders/:id/cancel", async (req, res) => {
 
 app.get("/api/admin/products", async (req, res) => {
   try {
-    const projectId = req.query.project || "burek01";
-    const { data, error } = await supabase
+    // 1) projectId iz query ili tenant
+    const projectId = req.query.project || req.tenant?.projectId || "burek01";
+
+    // 2) storeId iz tenant middleware
+    const storeId = req.tenant?.storeId || null;
+
+    // 3) osnovni query
+    let query = supabase
       .from("products")
       .select("*")
       .eq("project_id", projectId)
       .order("id", { ascending: true });
+
+    // 4) ako postoji store → filtriraj po store_id
+    if (storeId) {
+      query = query.eq("store_id", storeId);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error("/api/admin/products error:", error);
@@ -674,6 +687,7 @@ app.get("/api/admin/products", async (req, res) => {
     res.status(500).json({ error: "products_exception" });
   }
 });
+
 
 app.post("/api/admin/products", async (req, res) => {
   try {
