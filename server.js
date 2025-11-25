@@ -444,8 +444,12 @@ app.get("/api/projects/:id/config", async (req, res) => {
 app.post("/api/chat", async (req, res) => {
   try {
     const lang = (req.body.lang || "hr").toLowerCase();
-    const projectId = req.body.projectId || "burek01";
-    const messages = req.body.messages || [];
+const projectId = req.body.projectId || "burek01";
+let messages = req.body.messages || [];
+
+// sigurnosni limit: zadnjih 20 poruka
+messages = messages.slice(-20);
+
 
     const tCfg = tConfig(lang);
     const products = await loadProductsForProject(projectId);
