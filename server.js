@@ -578,9 +578,13 @@ app.use(["/admin", "/admin/*", "/api/admin", "/api/admin/*"], adminAuth);
 
 app.get("/api/admin/orders", async (req, res) => {
   try {
-    const projectId = req.query.project || "burek01";
+    // project iz queryja ili iz tenant konteksta
+    const projectId = req.query.project || req.tenant?.projectId || "burek01";
     const statusFilter = req.query.status || "open"; // open | all
     const dateFilter = req.query.date || "today"; // today | all
+
+    // store iz tenant konteksta (postavlja ga tenantMiddleware)
+    const storeId = req.tenant?.storeId || null;
 
     let query = supabase
       .from("orders")
@@ -588,14 +592,21 @@ app.get("/api/admin/orders", async (req, res) => {
       .eq("project_id", projectId)
       .order("created_at", { ascending: true });
 
+    // filtriranje po statusu (tvoj originalni kod)
     if (statusFilter === "open") {
       query = query.eq("status", "confirmed");
     } else if (statusFilter === "all") {
       query = query.in("status", ["confirmed", "delivered", "canceled"]);
     }
 
+    // filtriranje po datumu (tvoj originalni kod)
     if (dateFilter === "today") {
       query = query.gte("created_at", new Date().toISOString().substring(0, 10));
+    }
+
+    // NOVO: filtriranje po store_id ako postoji
+    if (storeId) {
+      query = query.eq("store_id", storeId);
     }
 
     const { data, error } = await query;
