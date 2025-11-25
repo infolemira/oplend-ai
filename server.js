@@ -749,12 +749,20 @@ app.post("/api/admin/products", async (req, res) => {
 
 app.get("/api/admin/customers", async (req, res) => {
   try {
-    const projectId = req.query.project || "burek01";
-    const { data, error } = await supabase
+    const projectId = req.query.project || req.tenant?.projectId || "burek01";
+    const storeId = req.tenant?.storeId || null;
+
+    let query = supabase
       .from("customers")
       .select("*")
       .eq("project_id", projectId)
       .order("created_at", { ascending: true });
+
+    if (storeId) {
+      query = query.eq("store_id", storeId);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error("/api/admin/customers error:", error);
@@ -770,31 +778,44 @@ app.get("/api/admin/customers", async (req, res) => {
 
 app.post("/api/admin/customers", async (req, res) => {
   try {
-    const projectId = req.body.projectId || "burek01";
-    const customer = { ...req.body, project_id: projectId };
+    const projectId = req.body.projectId || req.tenant?.projectId || "burek01";
+    const storeId = req.tenant?.storeId || null;
+
+    const customer = {
+      ...req.body,
+      project_id: projectId,
+      store_id: storeId
+    };
     delete customer.projectId;
 
     let result;
+
+    // UPDATE
     if (customer.id) {
       const id = customer.id;
       delete customer.id;
+
       const { data, error } = await supabase
         .from("customers")
         .update(customer)
         .eq("id", id)
         .select()
         .single();
+
       if (error) {
         console.error("customers update error:", error);
         return res.status(500).json({ error: "update_error" });
       }
       result = data;
+
+    // INSERT
     } else {
       const { data, error } = await supabase
         .from("customers")
         .insert(customer)
         .select()
         .single();
+
       if (error) {
         console.error("customers insert error:", error);
         return res.status(500).json({ error: "insert_error" });
@@ -803,6 +824,7 @@ app.post("/api/admin/customers", async (req, res) => {
     }
 
     res.json({ customer: result });
+
   } catch (err) {
     console.error("/api/admin/customers POST exception:", err);
     res.status(500).json({ error: "exception" });
