@@ -243,9 +243,22 @@ let turnCount = 0; // broj korisničkih poruka u ovom chatu
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
 
-        async function sendMessage() {
-          const text = inputEl.value.trim();
-          if (!text) return;
+          // LIMIT 20 PORUKA — OVDJE!
+  if (turnCount >= 20) {
+    addMessage(
+      "assistant",
+      "Dosegnut je maksimalan broj poruka za ovu narudžbu. Molim vas osvježite stranicu ako želite započeti novi razgovor."
+    );
+
+    inputEl.disabled = true;    // BLOKIRAJ PISANJE
+    sendBtn.disabled = true;    // BLOKIRAJ GUMB
+
+    return;
+  }
+
+          async function sendMessage() {
+  const text = inputEl.value.trim();
+  if (!text) return;
 
             // ako je korisnik već poslao 20 poruka, prekini razgovor
   if (turnCount >= 20) {
