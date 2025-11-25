@@ -2,7 +2,7 @@
 <html lang="hr">
   <head>
     <meta charset="UTF-8" />
-    <title>Burek – chat</title>
+    <title>Chat narudžbe proizvoda</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       body {
@@ -124,11 +124,10 @@
       </div>
 
       <div class="card">
-        <h1 id="hero-title">Rezerviraj svoj burek putem chata 🥐</h1>
+        <h1 id="hero-title">Rezerviraj svoje proizvode putem chata 🤖</h1>
         <p id="hero-lead">
-          Naruči burek sa sirom, mesom ili krumpirom putem jednostavnog chat
-          asistenta. Bez aplikacije, bez registracije — samo pošalji poruku
-          kao na WhatsAppu.
+          Naruči proizvode iz kataloga putem jednostavnog chat asistenta. Bez
+          aplikacije, bez registracije — samo pošalji poruku kao na WhatsAppu.
         </p>
       </div>
 
@@ -172,34 +171,40 @@
 
         const texts = {
           hr: {
-            heroTitle: "Rezerviraj svoj burek putem chata 🥐",
+            heroTitle: "Rezerviraj svoje proizvode putem chata 🤖",
             heroLead:
-              "Naruči burek sa sirom, mesom ili krumpirom putem jednostavnog chat asistenta. Bez aplikacije, bez registracije — samo pošalji poruku kao na WhatsAppu.",
+              "Naruči proizvode iz kataloga putem jednostavnog chat asistenta. Bez aplikacije, bez registracije — samo pošalji poruku kao na WhatsAppu.",
             chatTitle: "Chat narudžba",
             chatLead:
               "Upišite svoju narudžbu — bot će vas voditi kroz cijeli proces.",
             placeholder: "Napišite poruku...",
-            send: "Pošalji"
+            send: "Pošalji",
+            intro:
+              "Dobrodošli! Napišite koju robu želite naručiti (proizvod, broj komada, vrijeme preuzimanja)."
           },
           de: {
-            heroTitle: "Bestelle deinen Burek per Chat 🥐",
+            heroTitle: "Bestellen Sie Ihre Produkte per Chat 🤖",
             heroLead:
-              "Bestelle Burek mit Käse, Fleisch oder Kartoffeln über unseren einfachen Chat-Assistenten. Keine App, keine Registrierung – einfach wie bei WhatsApp schreiben.",
+              "Bestellen Sie Produkte aus dem Katalog über einen einfachen Chat-Assistenten. Keine App, keine Registrierung – schreiben Sie einfach wie bei WhatsApp.",
             chatTitle: "Chat-Bestellung",
             chatLead:
               "Geben Sie Ihre Bestellung ein – der Bot führt Sie durch den gesamten Ablauf.",
             placeholder: "Nachricht eingeben...",
-            send: "Senden"
+            send: "Senden",
+            intro:
+              "Willkommen! Schreiben Sie, welche Produkte Sie bestellen möchten (Produkt, Anzahl, Abholzeit)."
           },
           en: {
-            heroTitle: "Order your burek via chat 🥐",
+            heroTitle: "Order your products via chat 🤖",
             heroLead:
-              "Order burek with cheese, meat or potatoes through our simple chat assistant. No app, no registration – just send a message like on WhatsApp.",
+              "Order products from the catalogue using a simple chat assistant. No app, no registration – just send a message like on WhatsApp.",
             chatTitle: "Chat order",
             chatLead:
               "Type your order — the bot will guide you through the whole process.",
             placeholder: "Type a message...",
-            send: "Send"
+            send: "Send",
+            intro:
+              "Welcome! Tell me which products you want to order (product, quantity, pickup time)."
           }
         };
 
@@ -261,7 +266,11 @@
 
             const data = await resp.json();
             const reply = data.reply || "";
-            addMessage("assistant", reply.replace(/JSON_ORDER:.*/s, "").trim());
+            // sakrij JSON_ORDER dio iz prikaza
+            addMessage(
+              "assistant",
+              reply.replace(/JSON_ORDER:.*/s, "").trim()
+            );
             history.push({ role: "assistant", content: reply });
           } catch (e) {
             console.error(e);
@@ -290,7 +299,6 @@
             currentLang = lang;
             renderTexts();
 
-            // promijeni URL param ali ostavi chat povijest
             const url = new URL(window.location.href);
             url.searchParams.set("lang", lang);
             window.history.replaceState({}, "", url.toString());
@@ -299,17 +307,12 @@
 
         renderTexts();
 
-        // inicijalna poruka
-        addMessage(
-          "assistant",
-          texts[currentLang].heroLead +
-            "\n\n" +
-            "Napišite što želite naručiti (vrsta bureka, broj komada, vrijeme preuzimanja)."
-        );
+        // inicijalna poruka – generički proizvodi, bez bureka
+        const intro = texts[currentLang].intro;
+        addMessage("assistant", intro);
         history.push({
           role: "assistant",
-          content:
-            "Dobrodošli! Napišite što želite naručiti (vrsta bureka, broj komada, vrijeme preuzimanja)."
+          content: intro
         });
       })();
     </script>
