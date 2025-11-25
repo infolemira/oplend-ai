@@ -247,11 +247,23 @@ let turnCount = 0; // broj korisničkih poruka u ovom chatu
           const text = inputEl.value.trim();
           if (!text) return;
 
+            // ako je korisnik već poslao 20 poruka, prekini razgovor
+  if (turnCount >= 20) {
+    addMessage(
+      "assistant",
+      "Dosegnut je maksimalan broj poruka za ovu narudžbu. " +
+        "Molim vas osvježite stranicu ako želite započeti novi razgovor."
+    );
+    return;
+  }
+
           addMessage("user", text);
           history.push({ role: "user", content: text });
           // zadrži samo zadnjih 20 poruka u povijesti
           history = history.slice(-20);
+          turnCount++; // brojimo korisničke poruke
 
+          
           inputEl.value = "";
           inputEl.disabled = true;
           sendBtn.disabled = true;
