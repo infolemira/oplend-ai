@@ -274,7 +274,10 @@
               "assistant",
               reply.replace(/JSON_ORDER:.*/s, "").trim()
             );
-            history.push({ role: "assistant", content: reply });
+                        history.push({ role: "assistant", content: reply });
+            // zadrži samo zadnjih 20 poruka u povijesti
+            history = history.slice(-20);
+
           } catch (e) {
             console.error(e);
             addMessage(
