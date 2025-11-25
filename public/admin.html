@@ -2,7 +2,7 @@
 <html lang="hr">
   <head>
     <meta charset="UTF-8" />
-    <title>Burek – admin narudžbe</title>
+    <title>Chat narudžbe – admin</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       body {
@@ -105,13 +105,15 @@
           <a href="/admin/products">Proizvodi & popusti</a>
           <a href="/admin/customers">Kupci & kategorije</a>
         </div>
-        <h1>Burek – admin narudžbe</h1>
+        <h1>Narudžbe iz chata</h1>
         <div class="filters">
           <label>
             Status:
             <select id="filter-status">
               <option value="open">Samo otvorene (potvrđene)</option>
-              <option value="all">Sve (potvrđene + isporučene + otkazane)</option>
+              <option value="all">
+                Sve (potvrđene + isporučene + otkazane)
+              </option>
             </select>
           </label>
           <label>
@@ -131,7 +133,7 @@
               <th>Pickup</th>
               <th>Klijent</th>
               <th>Telefon</th>
-              <th>Artikli</th>
+              <th>Artikli (SKU: količina)</th>
               <th>Ukupno</th>
               <th>Status</th>
               <th>Akcija</th>
@@ -172,19 +174,14 @@
         return s;
       }
 
+      // FAZA 2: items je objekt { "SKU": qty }
       function renderItems(items) {
         if (!items) return "";
-        const map = {
-          burek_sir: "Sir",
-          burek_meso: "Meso",
-          burek_krumpir: "Krumpir"
-        };
         const out = [];
-        for (const [k, v] of Object.entries(items)) {
+        for (const [sku, v] of Object.entries(items)) {
           const q = Number(v || 0);
           if (!q) continue;
-          const name = map[k] || k;
-          out.push(`${name}: ${q}`);
+          out.push(`${sku}: ${q}`);
         }
         return out.join(", ");
       }
