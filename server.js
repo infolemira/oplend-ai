@@ -301,13 +301,10 @@ async function insertFinalOrder({
     skuMap[p.sku] = p;
   }
 
-  // očekujemo items npr: { kaese: 1, fleisch:2, kartoffeln:0 }
-  // mapiramo na sku
-  const normalizedItems = {
-    burek_sir: items.cheese ?? items.sir ?? items.kaese ?? 0,
-    burek_meso: items.meat ?? items.meso ?? items.fleisch ?? 0,
-    burek_krumpir: items.potato ?? items.krumpir ?? items.kartoffeln ?? 0
-  };
+  // očekujemo items u formatu:
+  // { "SKU": količina, ... } npr. { "TEST-PROD-01": 2, "TEST-PROD-02": 1 }
+  // to je već direktno iz JSON_ORDER-a
+  const normalizedItems = items || {};
 
   let computedTotal = 0;
   const priceDetails = {};
