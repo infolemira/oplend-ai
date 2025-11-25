@@ -209,8 +209,7 @@
         };
 
         let history = [];
-let turnCount = 0; // broj korisničkih poruka u ovom chatu
-
+        let turnCount = 0; // broj korisničkih poruka u ovom chatu
 
         function renderTexts() {
           const t = texts[currentLang];
@@ -243,40 +242,28 @@ let turnCount = 0; // broj korisničkih poruka u ovom chatu
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
 
-          // LIMIT 20 PORUKA — OVDJE!
-  if (turnCount >= 20) {
-    addMessage(
-      "assistant",
-      "Dosegnut je maksimalan broj poruka za ovu narudžbu. Molim vas osvježite stranicu ako želite započeti novi razgovor."
-    );
+        async function sendMessage() {
+          const text = inputEl.value.trim();
+          if (!text) return;
 
-    inputEl.disabled = true;    // BLOKIRAJ PISANJE
-    sendBtn.disabled = true;    // BLOKIRAJ GUMB
+          // LIMIT 20 PORUKA — nakon toga chat je zaključan
+          if (turnCount >= 20) {
+            addMessage(
+              "assistant",
+              "Dosegnut je maksimalan broj poruka za ovu narudžbu. Molim vas osvježite stranicu ako želite započeti novi razgovor."
+            );
 
-    return;
-  }
+            inputEl.disabled = true;
+            sendBtn.disabled = true;
 
-          async function sendMessage() {
-  const text = inputEl.value.trim();
-  if (!text) return;
-
-            // ako je korisnik već poslao 20 poruka, prekini razgovor
-  if (turnCount >= 20) {
-    addMessage(
-      "assistant",
-      "Dosegnut je maksimalan broj poruka za ovu narudžbu. " +
-        "Molim vas osvježite stranicu ako želite započeti novi razgovor."
-    );
-    return;
-  }
+            return;
+          }
 
           addMessage("user", text);
           history.push({ role: "user", content: text });
-          // zadrži samo zadnjih 20 poruka u povijesti
           history = history.slice(-20);
           turnCount++; // brojimo korisničke poruke
 
-          
           inputEl.value = "";
           inputEl.disabled = true;
           sendBtn.disabled = true;
@@ -296,15 +283,12 @@ let turnCount = 0; // broj korisničkih poruka u ovom chatu
 
             const data = await resp.json();
             const reply = data.reply || "";
-            // sakrij JSON_ORDER dio iz prikaza
             addMessage(
               "assistant",
               reply.replace(/JSON_ORDER:.*/s, "").trim()
             );
-                        history.push({ role: "assistant", content: reply });
-            // zadrži samo zadnjih 20 poruka u povijesti
+            history.push({ role: "assistant", content: reply });
             history = history.slice(-20);
-
           } catch (e) {
             console.error(e);
             addMessage(
@@ -312,9 +296,12 @@ let turnCount = 0; // broj korisničkih poruka u ovom chatu
               "Došlo je do greške. Pokušajte ponovo za nekoliko trenutaka."
             );
           } finally {
-            inputEl.disabled = false;
-            sendBtn.disabled = false;
-            inputEl.focus();
+            // ponovno omogući tipkanje SAMO ako još nismo prešli limit
+            if (turnCount < 20) {
+              inputEl.disabled = false;
+              sendBtn.disabled = false;
+              inputEl.focus();
+            }
           }
         }
 
