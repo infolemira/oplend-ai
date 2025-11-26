@@ -232,46 +232,60 @@ function computeUnitPrice(product, customerCategories = []) {
 /**
  * Pomoćna za dohvat ili kreiranje customer-a (phone + pin)
  */
+
 async function getOrCreateCustomer({ projectId, phone, pin, name }) {
-  if (!phone) return { error: "no_phone" };
-  if (!pin) return { error: "no_pin" };
+  const cleanPhone = (phone || "").toString().trim();
+  const cleanPin = (pin || "").toString().trim();
 
-  const cleanPhone = String(phone).trim();
-  const cleanPin = String(pin).trim();
+  if (!cleanPhone) {
+    return { customer: null, error: "no_phone" };
+  }
+  if (!cleanPin) {
+    return { customer: null, error: "no_pin" };
+  }
 
-  // 1) PROVJERI JE LI TELEFON VEĆ REGISTRIRAN
-  const { data: existingByPhone, error: phoneErr } = await supabase
+  // 1) prvo tražimo po project_id + phone (NE po PIN-u!)
+  const { data: existing, error: selError } = await supabase
     .from("customers")
     .select("*")
     .eq("project_id", projectId)
     .eq("phone", cleanPhone)
     .maybeSingle();
 
-  if (phoneErr) {
-    console.error("Supabase customer phone-check error:", phoneErr);
-    return { error: "db_error" };
+  if (selError) {
+    console.error("Supabase customers select error:", selError);
+    return { customer: null, error: "db_select" };
   }
 
-  // --- TELEFON POSTOJI → PIN MORA BITI TOČAN ---
-  if (existingByPhone) {
-    if (existingByPhone.pin !== cleanPin) {
-      return { error: "wrong_pin", customer: existingByPhone };
+  // 2) ako postoji kupac za taj telefon
+  if (existing) {
+    // ako PIN ne odgovara → BLOKIRAJ NARUDŽBU
+    if (existing.pin !== cleanPin) {
+      return { customer: null, error: "wrong_pin" };
     }
 
-    // PIN je točan → ažuriraj ime ako je novo
-    if (name && name !== existingByPhone.name) {
-      const { error: updErr } = await supabase
+    // ako je ime novo → update imena
+    if (name && name !== existing.name) {
+      const { data: updated, error: updErr } = await supabase
         .from("customers")
         .update({ name })
-        .eq("id", existingByPhone.id);
+        .eq("id", existing.id)
+        .select()
+        .single();
 
-      if (updErr) console.error("Supabase customers update error:", updErr);
+      if (updErr) {
+        console.error("Supabase customers update error:", updErr);
+        // i dalje vraćamo postojećeg, jer je PIN ok
+        return { customer: existing, error: null };
+      }
+
+      return { customer: updated, error: null };
     }
 
-    return { customer: existingByPhone };
+    return { customer: existing, error: null };
   }
 
-  // --- TELEFON NE POSTOJI → REGISTRIRAJ NOVOG KUPCA ---
+  // 3) ako NE postoji kupac za taj telefon → kreiramo NOVOG
   const { data: created, error: insError } = await supabase
     .from("customers")
     .insert({
@@ -286,11 +300,12 @@ async function getOrCreateCustomer({ projectId, phone, pin, name }) {
 
   if (insError) {
     console.error("Supabase customers insert error:", insError);
-    return { error: "insert_failed" };
+    return { customer: null, error: "db_insert" };
   }
 
-  return { customer: created };
+  return { customer: created, error: null };
 }
+
 
 /**
  * Upis nove potvrđene narudžbe + otkazivanje stare (ako je izmjena)
