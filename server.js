@@ -319,8 +319,7 @@ async function insertFinalOrder({
   items,
   total
 }) {
-  // prvo customer
-    const { customer, error } = await getOrCreateCustomer({
+  const { customer, error } = await getOrCreateCustomer({
     projectId,
     phone,
     pin,
@@ -334,11 +333,12 @@ async function insertFinalOrder({
     }
     if (error === "no_phone") return { error: "no_phone" };
     if (error === "no_pin") return { error: "no_pin" };
+
+    console.log("❌ Greška pri dohvaćanju/kreiranju kupca:", error);
     return { error: "customer_error" };
   }
 
   const customerCategories = customer?.categories || [];
-
 
   // učitaj proizvode i izračunaj total ako nije poslan
   const products = await loadProductsForProject(projectId);
