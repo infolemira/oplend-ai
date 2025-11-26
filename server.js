@@ -676,18 +676,119 @@ JSON mora sadržavati:
         total
       });
 
-      if (inserted) {
-        console.log("NEW FINAL ORDER:", {
-          projectId: usedProjectId,
-          phone,
-          name,
-          pickupTime: pickup_time,
-          items: inserted.items,
-          total: inserted.total,
-          orderId: inserted.id
-        });
+          if (finalOrder) {
+      const {
+        projectId: projFromModel,
+        phone,
+        pin,
+        name,
+        pickup_time,
+        items,
+        total
+      } = finalOrder;
+
+      // 🔒 IGNORIRAMO "your_project_id" iz modela – koristimo ono iz requesta
+      const usedProjectId = projectId || projFromModel || "burek01";
+
+      const insertResult = await insertFinalOrder({
+        projectId: usedProjectId,
+        phone,
+        pin,
+        name,
+        pickup_time,
+        items: items || {},
+        total
+      });
+
+      // ako je došlo do greške s kupcem / PIN-om
+      if (insertResult && insertResult.error) {
+        let errorReply = "";
+
+        if (insertResult.error === "wrong_pin") {
+          if (lang === "de") {
+            errorReply =
+              "Ich kann Ihre Bestellung nicht bestätigen, weil die PIN nicht mit diesem Telefon übereinstimmt. Bitte geben Sie Ihre richtige PIN ein oder wenden Sie sich an das Personal.";
+          } else if (lang === "en") {
+            errorReply =
+              "I cannot confirm your order because the PIN does not match this phone number. Please enter your correct PIN or contact the staff.";
+          } else {
+            errorReply =
+              "Ne mogu potvrditi vašu narudžbu jer PIN ne odgovara ovom broju telefona. Molim vas, unesite ispravan PIN ili se obratite osoblju.";
+          }
+        } else if (insertResult.error === "no_phone") {
+          if (lang === "de") {
+            errorReply =
+              "Ich kann die Bestellung nicht bestätigen, weil keine Telefonnummer angegeben wurde. Bitte geben Sie zuerst Ihre Telefonnummer ein.";
+          } else if (lang === "en") {
+            errorReply =
+              "I cannot confirm the order because no phone number was provided. Please enter your phone number first.";
+          } else {
+            errorReply =
+              "Ne mogu potvrditi narudžbu jer nije naveden broj telefona. Molim vas, najprije unesite svoj broj telefona.";
+          }
+        } else if (insertResult.error === "no_pin") {
+          if (lang === "de") {
+            errorReply =
+              "Ich kann die Bestellung nicht bestätigen, weil keine PIN angegeben wurde. Bitte geben Sie Ihre PIN ein.";
+          } else if (lang === "en") {
+            errorReply =
+              "I cannot confirm the order because no PIN was provided. Please enter your PIN.";
+          } else {
+            errorReply =
+              "Ne mogu potvrditi narudžbu jer nije naveden PIN. Molim vas, unesite svoj PIN.";
+          }
+        } else {
+          if (lang === "de") {
+            errorReply =
+              "Es ist ein Fehler bei der Bestätigung Ihrer Bestellung aufgetreten. Bitte versuchen Sie es erneut oder wenden Sie sich an das Personal.";
+          } else if (lang === "en") {
+            errorReply =
+              "There was an error confirming your order. Please try again or contact the staff.";
+          } else {
+            errorReply =
+              "Došlo je do greške pri potvrdi vaše narudžbe. Molim vas, pokušajte ponovno ili se obratite osoblju.";
+          }
+        }
+
+        // u slučaju greške IGNORIRAMO stari reply iz modela
+        return res.json({ reply: errorReply });
       }
+
+      // ako insertResult ne postoji → neka opća greška
+      if (!insertResult) {
+        let errorReply = "";
+        if (lang === "de") {
+          errorReply =
+            "Es ist ein Fehler bei der Bestätigung Ihrer Bestellung aufgetreten. Bitte versuchen Sie es erneut oder wenden Sie sich an das Personal.";
+        } else if (lang === "en") {
+          errorReply =
+            "There was an error confirming your order. Please try again or contact the staff.";
+        } else {
+          errorReply =
+            "Došlo je do greške pri potvrdi vaše narudžbe. Molim vas, pokušajte ponovno ili se obratite osoblju.";
+        }
+        return res.json({ reply: errorReply });
+      }
+
+      // ✅ uspješno – insertResult je stvarna narudžba iz tablice orders
+      const inserted = insertResult;
+
+      console.log("NEW FINAL ORDER:", {
+        projectId: usedProjectId,
+        phone,
+        name,
+        pickupTime: pickup_time,
+        items: inserted.items,
+        total: inserted.total,
+        orderId: inserted.id
+      });
     }
+
+    // ako nema finalOrder (nema JSON_ORDER) → vraćamo originalni reply
+    res.json({
+      reply
+    });
+
 
     res.json({
       reply
