@@ -233,56 +233,63 @@ function computeUnitPrice(product, customerCategories = []) {
  * Pomoćna za dohvat ili kreiranje customer-a (phone + pin)
  */
 async function getOrCreateCustomer({ projectId, phone, pin, name }) {
-  if (!phone || !pin) return null;
+  if (!phone) return { error: "no_phone" };
+  if (!pin) return { error: "no_pin" };
 
   const cleanPhone = String(phone).trim();
   const cleanPin = String(pin).trim();
 
-  // 1) pokušaj naći postojećeg kupca
-  const { data: existing, error: selError } = await supabase
+  // 1) PROVJERI JE LI TELEFON VEĆ REGISTRIRAN
+  const { data: existingByPhone, error: phoneErr } = await supabase
     .from("customers")
     .select("*")
     .eq("project_id", projectId)
     .eq("phone", cleanPhone)
-    .eq("pin", cleanPin)
     .maybeSingle();
 
-  if (selError) {
-    console.error("Supabase customers select error:", selError);
+  if (phoneErr) {
+    console.error("Supabase customer phone-check error:", phoneErr);
+    return { error: "db_error" };
   }
 
-  if (existing) {
-    // ako dođe novo ime – update
-    if (name && name !== existing.name) {
+  // --- TELEFON POSTOJI → PIN MORA BITI TOČAN ---
+  if (existingByPhone) {
+    if (existingByPhone.pin !== cleanPin) {
+      return { error: "wrong_pin", customer: existingByPhone };
+    }
+
+    // PIN je točan → ažuriraj ime ako je novo
+    if (name && name !== existingByPhone.name) {
       const { error: updErr } = await supabase
         .from("customers")
         .update({ name })
-        .eq("id", existing.id);
+        .eq("id", existingByPhone.id);
+
       if (updErr) console.error("Supabase customers update error:", updErr);
     }
-    return existing;
+
+    return { customer: existingByPhone };
   }
 
-  // 2) kreiraj novog kupca
- const { data: created, error: insError } = await supabase
-  .from("customers")
-  .insert({
-    id: randomUUID(),              // <── VAŽNO: ručno dodijeljen ID
-    project_id: projectId,
-    phone: cleanPhone,
-    pin: cleanPin,
-    name: name || null,
-    categories: []                 // default categories
-  })
-  .select()
-  .single();
+  // --- TELEFON NE POSTOJI → REGISTRIRAJ NOVOG KUPCA ---
+  const { data: created, error: insError } = await supabase
+    .from("customers")
+    .insert({
+      project_id: projectId,
+      phone: cleanPhone,
+      pin: cleanPin,
+      name: name || null,
+      categories: []
+    })
+    .select()
+    .single();
 
   if (insError) {
     console.error("Supabase customers insert error:", insError);
-    return null;
+    return { error: "insert_failed" };
   }
 
-  return created;
+  return { customer: created };
 }
 
 /**
@@ -298,8 +305,25 @@ async function insertFinalOrder({
   total
 }) {
   // prvo customer
-  const customer = await getOrCreateCustomer({ projectId, phone, pin, name });
-  const customerCategories = (customer && customer.categories) || [];
+    const { customer, error } = await getOrCreateCustomer({
+    projectId,
+    phone,
+    pin,
+    name
+  });
+
+  if (error) {
+    if (error === "wrong_pin") {
+      console.log("❌ Pogrešan PIN za telefon:", phone);
+      return { error: "wrong_pin" };
+    }
+    if (error === "no_phone") return { error: "no_phone" };
+    if (error === "no_pin") return { error: "no_pin" };
+    return { error: "customer_error" };
+  }
+
+  const customerCategories = customer?.categories || [];
+
 
   // učitaj proizvode i izračunaj total ako nije poslan
   const products = await loadProductsForProject(projectId);
