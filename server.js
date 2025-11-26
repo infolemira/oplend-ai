@@ -8,6 +8,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import { createTenantContext } from "./tenantContext.js";
+import { randomUUID } from "crypto";
+
 
 /* ------------------------------------------------------------------ */
 /*  OSNOVNO PODEŠAVANJE                                                */
@@ -262,17 +264,18 @@ async function getOrCreateCustomer({ projectId, phone, pin, name }) {
   }
 
   // 2) kreiraj novog kupca
-  const { data: created, error: insError } = await supabase
-    .from("customers")
-    .insert({
-      project_id: projectId,
-      phone: cleanPhone,
-      pin: cleanPin,
-      name: name || null,
-      categories: [] // default
-    })
-    .select()
-    .single();
+ const { data: created, error: insError } = await supabase
+  .from("customers")
+  .insert({
+    id: randomUUID(),              // <── VAŽNO: ručno dodijeljen ID
+    project_id: projectId,
+    phone: cleanPhone,
+    pin: cleanPin,
+    name: name || null,
+    categories: []                 // default categories
+  })
+  .select()
+  .single();
 
   if (insError) {
     console.error("Supabase customers insert error:", insError);
@@ -770,11 +773,14 @@ app.post("/api/admin/products", async (req, res) => {
 
     // INSERT
     } else {
-      const { data, error } = await supabase
-        .from("products")
-        .insert(product)
-        .select()
-        .single();
+  const { data, error } = await supabase
+    .from("products")
+    .insert({
+      id: randomUUID(),       // <── ovdje dodaj ID
+      ...product
+    })
+    .select()
+    .single();
 
       if (error) {
         console.error("products insert error:", error);
@@ -852,11 +858,14 @@ app.post("/api/admin/customers", async (req, res) => {
 
     // INSERT
     } else {
-      const { data, error } = await supabase
-        .from("customers")
-        .insert(customer)
-        .select()
-        .single();
+  const { data, error } = await supabase
+    .from("customers")
+    .insert({
+      id: randomUUID(),          // <── ovdje dodaj ID
+      ...customer
+    })
+    .select()
+    .single();
 
       if (error) {
         console.error("customers insert error:", error);
