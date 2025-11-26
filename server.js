@@ -491,133 +491,120 @@ app.get("/api/projects/:id/config", async (req, res) => {
 app.post("/api/chat", async (req, res) => {
   try {
     const lang = (req.body.lang || "hr").toLowerCase();
-const projectId = req.body.projectId || "burek01";
-let messages = req.body.messages || [];
+    const projectId = req.body.projectId || "burek01";
+    let messages = req.body.messages || [];
 
-// sigurnosni limit: zadnjih 20 poruka
-messages = messages.slice(-20);
-
+    // sigurnosni limit: zadnjih 20 poruka
+    messages = messages.slice(-20);
 
     const tCfg = tConfig(lang);
     const products = await loadProductsForProject(projectId);
 
-   const systemPrompt = `
+    // sistemski prompt – BEZ backtick kaosa
+    const katalogLinije = products
+      .map((p) => {
+        const popustText = p.is_discount_active
+          ? (p.discount_name || "aktivni popust")
+          : "nema popusta";
 
-    const systemPrompt = `
+        return `- SKU: ${p.sku}, HR: ${p.name_hr}, DE: ${p.name_de}, EN: ${p.name_en}, cijena: ${p.base_price} €. Popust: ${popustText}.`;
+      })
+      .join("\n");
 
-Ti si inteligentni chatbot za primanje narudžbi proizvoda iz kataloga.
+    const jezikLabel =
+      lang === "de" ? "njemački" : lang === "en" ? "engleski" : "hrvatski";
 
-Uvijek odgovaraj na jeziku: ${
-  lang === "de" ? "njemački" : lang === "en" ? "engleski" : "hrvatski"
-}.
-
-Katalog proizvoda (nazivi i cijene dolje su već iz baze):
-
-${products
-  .map((p) => {
-    const popustText = p.is_discount_active
-      ? (p.discount_name || "aktivni popust")
-      : "nema popusta";
-
-    return \`- SKU: ${p.sku}, HR: ${p.name_hr}, DE: ${p.name_de}, EN: ${p.name_en}, cijena: ${p.base_price} €. Popust: ${popustText}.\`;
-  })
-  .join("\\n")}
-
-VAŽNA PRAVILA RADA (IDENTIFIKACIJA KLIJENTA):
-
-1. U PRVOJ PORUCI TI SE OBRATIŠ KLIJENTU I LJUBAZNO GA ZAMOLIŠ
-   DA NAJPRIJE NAVEDE SVOJ BROJ TELEFONA.
-   NEMOJ ODMAH TRAŽITI NARUDŽBU, NEGO PRVO TELEFON.
-
-   Primjeri prvog pitanja (ovisno o jeziku):
-   - HR: "Dobrodošli! Molim vas, prvo navedite svoj broj telefona."
-   - DE: "Willkommen! Bitte geben Sie zuerst Ihre Telefonnummer an."
-   - EN: "Welcome! Please first tell me your phone number."
-
-2. Nakon što korisnik pošalje broj telefona:
-   - ZATIM traži ostale podatke: ime, PIN (lozinku) i detalje narudžbe
-     (proizvodi iz kataloga, količina, vrijeme preuzimanja).
-
-3. PIN:
-   - PIN služi za potvrdu narudžbi i izmjena.
-   - U svakom procesu narudžbe trebaš imati jasno naveden PIN.
-   - Za NOVE klijente PIN se definira prvi put kada daju broj telefona + ime.
-   - Za VEĆ POSTOJEĆE klijente tražiš da potvrde isti PIN prije potvrde nove narudžbe.
-
-4. TI NE PROVJERAVAŠ BAZU DIREKTNO.
-   Backend sustav provjerava postoji li taj telefon i PIN.
-   Tvoj zadatak je SAMO da prikupiš:
-   - broj telefona,
-   - ime,
-   - PIN,
-   - proizvode,
-   - količine,
-   - vrijeme preuzimanja.
-
-5. NIKADA NEMOJ SPOMINJATI "backend", "bazu podataka" ili tehničke detalje.
-   Korisniku odgovaraj normalno, npr.:
-   - "Ukupna cijena je približno X €."
-   - "Vašu narudžbu ću proslijediti na pripremu."
-   NIKAD nemoj reći: "cijena će biti izračunata na backendu" ili slično.
-
-6. Ako korisnik uporni šalje sadržaj koji nema veze s narudžbom
-   (random tekst, oglasi, dugački copy/paste s Facebooka, itd.),
-   nakon nekoliko pokušaja objašnjenja smiješ ljubazno prekinuti razgovor:
-   - HR: "Nažalost, bez konkretnih podataka o narudžbi ne mogu pomoći.
-          Ako želite naručiti, molim vas da napišete proizvod, količinu i vrijeme preuzimanja."
-   - DE/EN analogno.
-
-7. Ako korisnik uopće ne da broj telefona:
-   - Objasni da bez broja telefona ne možeš potvrditi narudžbu.
-   - Nemoj generirati JSON_ORDER bez telefona.
-
-Tvoj zadatak (sažetak):
-
-1. Vodi korisnika kroz narudžbu:
-   - prvo telefon,
-   - zatim ime,
-   - PIN,
-   - proizvodi iz kataloga (SKU ili naziv),
-   - količine,
-   - vrijeme preuzimanja (pickup_time).
-
-2. Na temelju kataloga i količina napravi prijedlog ukupne cijene
-   (samo koristi cijene koje vidiš gore; backend će precizno izračunati).
-   - Nemoj objašnjavati da backend računa cijenu.
-   - Korisniku samo reci finalni iznos u valuti.
-
-3. Kada korisnik JASNO potvrdi narudžbu, **OBAVEZNO** na kraj poruke dodaj:
-   \`JSON_ORDER: {...}\`
-
-JSON mora sadržavati:
-- projectId
-- phone
-- pin
-- name
-- pickup_time
-- items → objekt:
-  npr.
-    {
-      "TEST-PROD-01": 2,
-      "TEST-PROD-02": 1
-    }
-- total → broj ili null ako nisi siguran
-
-4. Ako korisnik želi izmijeniti prethodnu narudžbu:
-   - koristi isti telefon + PIN,
-   - prikupi nove količine proizvoda,
-   - generiraj novi JSON_ORDER.
-
-5. Budi kratak, jasan i ljubazan.
-   Ne spominji interne tehničke detalje, backend, baze podataka, JSON
-   (osim u skrivenom JSON_ORDER bloku na kraju poruke).
-
-`;
+    const systemPrompt = [
+      `Ti si inteligentni chatbot za primanje narudžbi proizvoda iz kataloga.`,
+      ``,
+      `Uvijek odgovaraj na jeziku: ${jezikLabel}.`,
+      ``,
+      `Katalog proizvoda (nazivi i cijene dolje su već iz baze):`,
+      katalogLinije,
+      ``,
+      `VAŽNA PRAVILA – IDENTIFIKACIJA KLIJENTA:`,
+      ``,
+      `1. U PRVOJ PORUCI TI SE OBRATIŠ KLIJENTU I LJUBAZNO GA ZAMOLIŠ`,
+      `   DA NAJPRIJE NAVEDE SVOJ BROJ TELEFONA.`,
+      `   NEMOJ ODMAH TRAŽITI NARUDŽBU, NEGO PRVO TELEFON.`,
+      ``,
+      `   Primjeri prvog pitanja (ovisno o jeziku):`,
+      `   - HR: "Dobrodošli! Molim vas, prvo navedite svoj broj telefona."`,
+      `   - DE: "Willkommen! Bitte geben Sie zuerst Ihre Telefonnummer an."`,
+      `   - EN: "Welcome! Please first tell me your phone number."`,
+      ``,
+      `2. Nakon što korisnik pošalje broj telefona:`,
+      `   - ZATIM traži ostale podatke: ime, PIN (lozinku) i detalje narudžbe`,
+      `     (proizvodi iz kataloga, količina, vrijeme preuzimanja).`,
+      ``,
+      `3. PIN:`,
+      `   - PIN služi za potvrdu narudžbi i izmjena.`,
+      `   - Za NOVE klijente PIN se definira prvi put kada daju broj telefona + ime.`,
+      `   - Za VEĆ POSTOJEĆE klijente tražiš da potvrde isti PIN prije potvrde nove narudžbe.`,
+      ``,
+      `4. TI NE PROVJERAVAŠ BAZU DIREKTNO.`,
+      `   Backend sustav provjerava postoji li taj telefon i PIN.`,
+      `   Tvoj zadatak je SAMO da prikupiš:`,
+      `   - broj telefona,`,
+      `   - ime,`,
+      `   - PIN,`,
+      `   - proizvode (iz kataloga),`,
+      `   - količine,`,
+      `   - vrijeme preuzimanja.`,
+      ``,
+      `5. NIKADA NEMOJ SPOMINJATI "backend", "bazu podataka" ili tehničke detalje.`,
+      `   Korisniku odgovaraj normalno, npr.:`,
+      `   - "Ukupna cijena je približno X €."`,
+      `   - "Vašu narudžbu ću proslijediti na pripremu."`,
+      `   NIKAD nemoj reći: "cijena će biti izračunata na backendu" ili slično.`,
+      ``,
+      `6. Ako korisnik uopće ne da broj telefona:`,
+      `   - Objasni da bez broja telefona ne možeš potvrditi narudžbu.`,
+      `   - Nemoj generirati JSON_ORDER bez telefona.`,
+      ``,
+      `7. Ako korisnik uporno šalje sadržaj koji nema veze s naručivanjem`,
+      `   (random tekst, oglasi, copy/paste s Facebooka itd.),`,
+      `   nakon nekoliko pokušaja objašnjenja smiješ ljubazno prekinuti razgovor.`,
+      ``,
+      `TVOJ ZADATAK (SAŽETAK):`,
+      ``,
+      `1. Vodi korisnika kroz narudžbu redom:`,
+      `   - telefon,`,
+      `   - ime,`,
+      `   - PIN,`,
+      `   - proizvodi (SKU ili naziv) i količine,`,
+      `   - vrijeme preuzimanja (pickup_time).`,
+      ``,
+      `2. Na temelju kataloga i količina napravi prijedlog ukupne cijene`,
+      `   (samo koristi cijene iz kataloga; backend radi precizan izračun).`,
+      `   Nemoj spominjati backend – samo reci iznos u valuti.`,
+      ``,
+      `3. Kada korisnik JASNO potvrdi narudžbu, OBAVEZNO na kraj poruke dodaj:`,
+      `   JSON_ORDER: {...}`,
+      ``,
+      `   JSON mora sadržavati:`,
+      `   - projectId`,
+      `   - phone`,
+      `   - pin`,
+      `   - name`,
+      `   - pickup_time`,
+      `   - items → objekt, npr.:`,
+      `       { "TEST-PROD-01": 2, "TEST-PROD-02": 1 }`,
+      `   - total → broj ili null ako nisi siguran.`,
+      ``,
+      `4. Ako korisnik želi izmijeniti prethodnu narudžbu:`,
+      `   - koristi isti telefon + PIN,`,
+      `   - prikupi nove količine,`,
+      `   - generiraj novi JSON_ORDER.`,
+      ``,
+      `5. Budi vrlo kratak, jasan i ljubazan.`,
+      `   Ne spominji interne tehničke detalje, backend ili baze podataka.`,
+    ].join("\n");
 
     const openaiMessages = [
       {
         role: "system",
-        content: `${tCfg.welcome}\n\n${systemPrompt}`
+        content: systemPrompt
       },
       ...messages
     ];
@@ -630,14 +617,12 @@ JSON mora sadržavati:
 
     const reply = completion.choices[0].message.content || "";
 
-      // tražimo JSON_ORDER:
+    // tražimo JSON_ORDER:
     let finalOrder = null;
     const marker = "JSON_ORDER:";
     const idx = reply.indexOf(marker);
     if (idx !== -1) {
       const jsonPart = reply.substring(idx + marker.length).trim();
-
-      // Izvuci SAMO prvi JSON objekt između { }
       const match = jsonPart.match(/\{[\s\S]*\}/);
       if (match) {
         const jsonOnly = match[0];
@@ -651,7 +636,6 @@ JSON mora sadržavati:
       }
     }
 
-
     if (finalOrder) {
       const {
         projectId: projFromModel,
@@ -663,31 +647,7 @@ JSON mora sadržavati:
         total
       } = finalOrder;
 
-        const usedProjectId = projectId || projFromModel || "burek01";
-
-
-      const inserted = await insertFinalOrder({
-        projectId: usedProjectId,
-        phone,
-        pin,
-        name,
-        pickup_time,
-        items: items || {},
-        total
-      });
-
-          if (finalOrder) {
-      const {
-        projectId: projFromModel,
-        phone,
-        pin,
-        name,
-        pickup_time,
-        items,
-        total
-      } = finalOrder;
-
-      // 🔒 IGNORIRAMO "your_project_id" iz modela – koristimo ono iz requesta
+      // IGNORIRAMO "your_project_id" iz modela – koristimo ono iz requesta
       const usedProjectId = projectId || projFromModel || "burek01";
 
       const insertResult = await insertFinalOrder({
@@ -707,7 +667,7 @@ JSON mora sadržavati:
         if (insertResult.error === "wrong_pin") {
           if (lang === "de") {
             errorReply =
-              "Ich kann Ihre Bestellung nicht bestätigen, weil die PIN nicht mit diesem Telefon übereinstimmt. Bitte geben Sie Ihre richtige PIN ein oder wenden Sie sich an das Personal.";
+              "Ich kann Ihre Bestellung nicht bestätigen, weil die PIN nicht zu dieser Telefonnummer passt. Bitte geben Sie Ihre richtige PIN ein oder wenden Sie sich an das Personal.";
           } else if (lang === "en") {
             errorReply =
               "I cannot confirm your order because the PIN does not match this phone number. Please enter your correct PIN or contact the staff.";
@@ -724,7 +684,7 @@ JSON mora sadržavati:
               "I cannot confirm the order because no phone number was provided. Please enter your phone number first.";
           } else {
             errorReply =
-              "Ne mogu potvrditi narudžbu jer nije naveden broj telefona. Molim vas, najprije unesite svoj broj telefona.";
+              "Ne mogu potvrditi narudžbu jer nije naveden broj telefona. Molim vas da najprije unesete svoj broj telefona.";
           }
         } else if (insertResult.error === "no_pin") {
           if (lang === "de") {
@@ -750,7 +710,7 @@ JSON mora sadržavati:
           }
         }
 
-        // u slučaju greške IGNORIRAMO stari reply iz modela
+        // u slučaju greške ignoriramo stari reply iz modela
         return res.json({ reply: errorReply });
       }
 
@@ -770,9 +730,8 @@ JSON mora sadržavati:
         return res.json({ reply: errorReply });
       }
 
-      // ✅ uspješno – insertResult je stvarna narudžba iz tablice orders
+      // uspješno – log i pusti originalni odgovor (frontend ionako skriva JSON_ORDER)
       const inserted = insertResult;
-
       console.log("NEW FINAL ORDER:", {
         projectId: usedProjectId,
         phone,
@@ -785,14 +744,7 @@ JSON mora sadržavati:
     }
 
     // ako nema finalOrder (nema JSON_ORDER) → vraćamo originalni reply
-    res.json({
-      reply
-    });
-
-
-    res.json({
-      reply
-    });
+    res.json({ reply });
   } catch (err) {
     console.error("/api/chat error:", err);
     res.status(500).json({ error: "chat_error" });
