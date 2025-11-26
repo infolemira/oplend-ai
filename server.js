@@ -233,12 +233,16 @@ function computeUnitPrice(product, customerCategories = []) {
 async function getOrCreateCustomer({ projectId, phone, pin, name }) {
   if (!phone || !pin) return null;
 
+  const cleanPhone = String(phone).trim();
+  const cleanPin = String(pin).trim();
+
+  // 1) pokušaj naći postojećeg kupca
   const { data: existing, error: selError } = await supabase
     .from("customers")
     .select("*")
     .eq("project_id", projectId)
-    .eq("phone", phone)
-    .eq("pin", pin)
+    .eq("phone", cleanPhone)
+    .eq("pin", cleanPin)
     .maybeSingle();
 
   if (selError) {
@@ -246,7 +250,7 @@ async function getOrCreateCustomer({ projectId, phone, pin, name }) {
   }
 
   if (existing) {
-    // Ako je došao novi name, updejtaj
+    // ako dođe novo ime – update
     if (name && name !== existing.name) {
       const { error: updErr } = await supabase
         .from("customers")
@@ -257,13 +261,14 @@ async function getOrCreateCustomer({ projectId, phone, pin, name }) {
     return existing;
   }
 
+  // 2) kreiraj novog kupca
   const { data: created, error: insError } = await supabase
     .from("customers")
     .insert({
       project_id: projectId,
-      phone,
-      pin,
-      name,
+      phone: cleanPhone,
+      pin: cleanPin,
+      name: name || null,
       categories: [] // default
     })
     .select()
@@ -704,92 +709,86 @@ app.post("/api/admin/orders/:id/cancel", async (req, res) => {
 
 app.get("/api/admin/products", async (req, res) => {
   try {
-    // 1) projectId iz query ili tenant
-    const projectId = req.query.project || req.tenant?.projectId || "burek01";
+    const projectId = req.query.project || "burek01";
 
-    // 2) storeId iz tenant middleware
-    const storeId = req.tenant?.storeId || null;
-
-    // 3) osnovni query
-    let query = supabase
+    const { data, error } = await supabase
       .from("products")
       .select("*")
       .eq("project_id", projectId)
       .order("id", { ascending: true });
 
-    // 4) ako postoji store → filtriraj po store_id
-    if (storeId) {
-      query = query.eq("store_id", storeId);
-    }
-
-    const { data, error } = await query;
-
     if (error) {
       console.error("/api/admin/products error:", error);
-      return res.status(500).json({ error: "products_error" });
+      return res.status(500).json({ error: "products_error", detail: error.message });
     }
 
     res.json({ products: data || [] });
   } catch (err) {
     console.error("/api/admin/products exception:", err);
-    res.status(500).json({ error: "products_exception" });
+    res.status(500).json({ error: "products_exception", detail: String(err) });
   }
 });
 
 app.post("/api/admin/products", async (req, res) => {
   try {
-    const projectId = req.body.projectId || req.tenant?.projectId || "burek01";
-    const storeId = req.tenant?.storeId || null;
+    const projectId = req.body.projectId || "burek01";
+    const payload = req.body || {};
 
     const product = {
-      ...req.body,
       project_id: projectId,
-      store_id: storeId
+      sku: payload.sku,
+      name_hr: payload.name_hr,
+      name_de: payload.name_de,
+      name_en: payload.name_en,
+      base_price: Number(payload.base_price || 0),
+      discount_type: payload.discount_type || null,      // "percentage" | "fixed" | null
+      discount_value: payload.discount_value != null ? Number(payload.discount_value) : null,
+      discount_name: payload.discount_name || null,
+      is_discount_active: !!payload.is_discount_active,
+      allowed_categories: Array.isArray(payload.allowed_categories)
+        ? payload.allowed_categories
+        : (payload.allowed_categories ? String(payload.allowed_categories).split(",").map(c => c.trim()).filter(Boolean) : []),
+      is_active: payload.is_active !== false
     };
-    delete product.projectId;
 
-    let q = supabase.from("products");
     let result;
 
     // UPDATE
-    if (product.id) {
-      const id = product.id;
-      delete product.id;
-
-      const { data, error } = await q
+    if (payload.id) {
+      const { data, error } = await supabase
+        .from("products")
         .update(product)
-        .eq("id", id)
+        .eq("id", payload.id)
         .select()
         .single();
 
       if (error) {
         console.error("products update error:", error);
-        return res.status(500).json({ error: "update_error" });
+        return res.status(500).json({ error: "update_error", detail: error.message });
       }
       result = data;
 
     // INSERT
     } else {
-      const { data, error } = await q
+      const { data, error } = await supabase
+        .from("products")
         .insert(product)
         .select()
         .single();
 
       if (error) {
         console.error("products insert error:", error);
-        return res.status(500).json({ error: "insert_error" });
+        return res.status(500).json({ error: "insert_error", detail: error.message });
       }
       result = data;
     }
 
     res.json({ product: result });
-
   } catch (err) {
     console.error("/api/admin/products POST exception:", err);
-    res.status(500).json({ error: "exception" });
+    res.status(500).json({ error: "exception", detail: String(err) });
   }
 });
-
 
 /* ------------------------------------------------------------------ */
 /*  ADMIN: CUSTOMERS API                                               */
@@ -797,62 +796,57 @@ app.post("/api/admin/products", async (req, res) => {
 
 app.get("/api/admin/customers", async (req, res) => {
   try {
-    const projectId = req.query.project || req.tenant?.projectId || "burek01";
-    const storeId = req.tenant?.storeId || null;
+    const projectId = req.query.project || "burek01";
 
-    let query = supabase
+    const { data, error } = await supabase
       .from("customers")
       .select("*")
       .eq("project_id", projectId)
       .order("created_at", { ascending: true });
 
-    if (storeId) {
-      query = query.eq("store_id", storeId);
-    }
-
-    const { data, error } = await query;
-
     if (error) {
       console.error("/api/admin/customers error:", error);
-      return res.status(500).json({ error: "customers_error" });
+      return res.status(500).json({ error: "customers_error", detail: error.message });
     }
 
     res.json({ customers: data || [] });
   } catch (err) {
     console.error("/api/admin/customers exception:", err);
-    res.status(500).json({ error: "customers_exception" });
+    res.status(500).json({ error: "customers_exception", detail: String(err) });
   }
 });
 
 app.post("/api/admin/customers", async (req, res) => {
   try {
-    const projectId = req.body.projectId || req.tenant?.projectId || "burek01";
-    const storeId = req.tenant?.storeId || null;
+    const projectId = req.body.projectId || "burek01";
+
+    // iz bodyja dolazi: id?, phone, pin, name, categories (array)
+    const payload = req.body || {};
 
     const customer = {
-      ...req.body,
       project_id: projectId,
-      store_id: storeId
+      phone: payload.phone,
+      pin: payload.pin,
+      name: payload.name || null,
+      categories: Array.isArray(payload.categories)
+        ? payload.categories
+        : (payload.categories ? String(payload.categories).split(",").map(c => c.trim()).filter(Boolean) : [])
     };
-    delete customer.projectId;
 
     let result;
 
     // UPDATE
-    if (customer.id) {
-      const id = customer.id;
-      delete customer.id;
-
+    if (payload.id) {
       const { data, error } = await supabase
         .from("customers")
         .update(customer)
-        .eq("id", id)
+        .eq("id", payload.id)
         .select()
         .single();
 
       if (error) {
         console.error("customers update error:", error);
-        return res.status(500).json({ error: "update_error" });
+        return res.status(500).json({ error: "update_error", detail: error.message });
       }
       result = data;
 
@@ -866,16 +860,15 @@ app.post("/api/admin/customers", async (req, res) => {
 
       if (error) {
         console.error("customers insert error:", error);
-        return res.status(500).json({ error: "insert_error" });
+        return res.status(500).json({ error: "insert_error", detail: error.message });
       }
       result = data;
     }
 
     res.json({ customer: result });
-
   } catch (err) {
     console.error("/api/admin/customers POST exception:", err);
-    res.status(500).json({ error: "exception" });
+    res.status(500).json({ error: "exception", detail: String(err) });
   }
 });
 
