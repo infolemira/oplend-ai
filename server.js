@@ -602,52 +602,63 @@ JSON mora sadržavati:
 
 app.use(["/admin", "/admin/*", "/api/admin", "/api/admin/*"], adminAuth);
 
-app.get("/api/admin/orders", async (req, res) => {
+// -----------------------
+// ADMIN: ORDERS API (bez store_id filtra)
+// -----------------------
+app.get("/api/admin/orders", adminAuth, async (req, res) => {
   try {
-    // project iz queryja ili iz tenant konteksta
-    const projectId = req.query.project || req.tenant?.projectId || "burek01";
-    const statusFilter = req.query.status || "open"; // open | all
-    const dateFilter = req.query.date || "today"; // today | all
-
-    // store iz tenant konteksta (postavlja ga tenantMiddleware)
-    const storeId = req.tenant?.storeId || null;
+    const projectId = req.query.project || "burek01";
+    const statusFilter = req.query.status || "open";   // open | all
+    const dateFilter = req.query.date || "today";      // today | all
 
     let query = supabase
       .from("orders")
       .select("*")
       .eq("project_id", projectId)
-      .order("created_at", { ascending: true });
+      .neq("status", "draft"); // ne prikazujemo nacrte
 
-    // filtriranje po statusu (tvoj originalni kod)
+    // status filter
     if (statusFilter === "open") {
-      query = query.eq("status", "confirmed");
+      query = query.in("status", ["confirmed"]);
     } else if (statusFilter === "all") {
       query = query.in("status", ["confirmed", "delivered", "canceled"]);
     }
 
-    // filtriranje po datumu (tvoj originalni kod)
+    // date filter
     if (dateFilter === "today") {
-      query = query.gte("created_at", new Date().toISOString().substring(0, 10));
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const isoStart = today.toISOString();
+      query = query.gte("created_at", isoStart);
     }
 
-    // NOVO: filtriranje po store_id ako postoji
-    if (storeId) {
-      query = query.eq("store_id", storeId);
-    }
-
-    const { data, error } = await query;
+    const { data, error } = await query.order("created_at", {
+      ascending: false,
+    });
 
     if (error) {
-      console.error("/api/admin/orders error:", error);
-      return res.status(500).json({ error: "orders_error" });
+      console.error("ADMIN /orders error:", error);
+      return res.status(500).json({ error: "DB error", details: error.message });
     }
 
-    res.json({ orders: data || [] });
+    const orders = (data || []).map((o) => ({
+      id: o.id,
+      created_at: o.created_at,
+      pickup_time: o.pickup_time,
+      name: o.user_name || o.name || "",
+      phone: o.user_phone || o.phone || "",
+      items: o.items || {},
+      total: o.total,
+      status: o.status,
+    }));
+
+    return res.json({ orders });
   } catch (err) {
-    console.error("/api/admin/orders exception:", err);
-    res.status(500).json({ error: "orders_exception" });
+    console.error("ADMIN /orders exception:", err);
+    return res.status(500).json({ error: "Server error" });
   }
 });
+
 
 app.post("/api/admin/orders/:id/delivered", async (req, res) => {
   try {
